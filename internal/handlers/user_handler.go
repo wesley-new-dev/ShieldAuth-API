@@ -4,7 +4,6 @@ import (
 	"log"
 	"encoding/json"
 	"net/http"
-	"strconv"
 
 	"ShieldAuth-API/internal/middleware"
 	"ShieldAuth-API/internal/response"
@@ -83,20 +82,16 @@ func (changeName *ChangeNameHandler) ChangeNameHandler(w http.ResponseWriter, r 
 		return
 	}
 
-	idString, ok := r.Context().Value(middleware.Key).(string)
+	auth, ok := r.Context().Value(middleware.Key).(middleware.AuthContext)
 	if !ok {
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
 
-	idContext, err := strconv.Atoi(idString)
-	if err != nil {
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
-		return
-	}
+	userID := auth.UserID
 
 	input := service.ChangeNameData{
-		ID: idContext,
+		ID: userID,
 		CurrentName: req.CurrentName,
 		NewName: req.NewName,
 	}
@@ -128,20 +123,16 @@ func (changeEmail *ChangeEmailHandler) ChangeEmailHandler(w http.ResponseWriter,
 		return
 	}
 
-	idString, ok := r.Context().Value(middleware.Key).(string)
+	auth, ok := r.Context().Value(middleware.Key).(middleware.AuthContext)
 	if !ok {
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
 
-	idContext, err := strconv.Atoi(idString)
-	if err != nil {
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
-		return
-	}
+	userID := auth.UserID
 
 	input := service.ChangeEmailData{
-		ID: idContext,
+		ID: userID,
 		CurrentEmail: req.CurrentEmail,
 		NewEmail: req.NewEmail,
 		ConfirmNewEmail: req.ConfirmNewEmail,
