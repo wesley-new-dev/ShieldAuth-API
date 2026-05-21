@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -13,12 +14,11 @@ type ContextKey string
 const Key ContextKey = "userID"
 
 type Claims struct {
-	UserID int `json:"sub"`
 	jwt.RegisteredClaims
 }
 type AuthContext struct {
-	UserID int
-	TokenHash string
+	UserID 		int
+	TokenHash 	string
 }
 
 func AuthMiddleware(secretKey string) func(http.Handler) http.Handler {
@@ -38,10 +38,8 @@ func AuthMiddleware(secretKey string) func(http.Handler) http.Handler {
 				return
 			}
 
-			claims := &Claims{}
-
-			token, err := jwt.ParseWithClaims(tokenString, claims, func(t *jwt.Token) (interface{}, error) {
-				if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
+			token, err := jwt.ParseWithClaims(tokenString, &Claims{}, func(t *jwt.Token) (interface{}, error) {
+				if t.Method != jwt.SigningMethodHS256{
 					return nil, fmt.Errorf("unexpected signing method")
 				}
 
@@ -53,24 +51,26 @@ func AuthMiddleware(secretKey string) func(http.Handler) http.Handler {
 				return
 			}
 
-			secondClaims := token.Claims.(jwt.MapClaims)
-			jti, ok := secondClaims["jti"].(string)
+			claims, ok := token.Claims.(*Claims)
 			if !ok {
-				http.Error(w, "invalid token jti", http.StatusUnauthorized)
+				http.Error(w, "invalid claims", http.StatusUnauthorized)
 				return
 			}
 
-			sub, ok := secondClaims["sub"].(float64)
-			if !ok {
-				http.Error(w, "invalid token sub", http.StatusUnauthorized)
+			if claims.Subject == "" {
+				http.Error(w, "missing subject", http.StatusUnauthorized)
 				return
 			}
 
-			userID := int(sub)
+			userID, err := strconv.Atoi(claims.Subject)
+			if err != nil {
+				http.Error(w, "invalid user id", http.StatusUnauthorized)
+				return
+			}
 
 			auth := AuthContext{
 				UserID: userID,
-				TokenHash: jti,
+				TokenHash: claims.ID,
 			}
 	
 			ctx := context.WithValue(r.Context(), Key, auth)
