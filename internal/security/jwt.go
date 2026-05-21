@@ -2,6 +2,7 @@ package security
 
 import (
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -10,14 +11,14 @@ import (
 
 
 func TokenJWT(userID int) (string, error) {
-	claims := jwt.MapClaims{
-		"sub": userID,
-		"exp": time.Now().Add(time.Hour * 24).Unix(),
-		"iat": time.Now().Unix(),
-		"jti": uuid.NewString(),
+	claims := jwt.RegisteredClaims{
+		Subject: strconv.Itoa(userID),
+		ExpiresAt: jwt.NewNumericDate(time.Now().Add(24 * time.Hour)),
+		IssuedAt: jwt.NewNumericDate(time.Now()),
+		ID: uuid.NewString(),
 	}
 
-	tokenJwt := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	secretKey := os.Getenv("JWT_KEY")
-	return tokenJwt.SignedString([]byte(secretKey))
+	return token.SignedString([]byte(secretKey))
 }
