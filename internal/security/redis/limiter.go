@@ -8,6 +8,10 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
+type RateLimiter interface {
+	Allow(ctx context.Context, key string, maxAttempts int, window time.Duration) (bool, error)
+}
+
 type RedisLimiter struct {
 	client *redis.Client
 	scriptSha string
