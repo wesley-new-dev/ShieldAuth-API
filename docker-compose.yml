@@ -6,24 +6,47 @@ services:
     environment:
       MYSQL_DATABASE: shieldauth_db
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
-    ports:
-      - "3306:3306"
+      MYSQL_USER: ${DB_USER}
+      MYSQL_PASSWORD: ${DB_PASSWORD}
+    expose:
+      - "3306"
     volumes:
       - db_data:/var/lib/mysql
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD}"]
-      interval: 30s
+      interval: 10s
       timeout: 5s
       retries: 5
     networks:
       - shieldauth-net
 
   redis:
-    image: redis:alpine
+    image: redis:7-alpine
     container_name: shieldauth-redis
     restart: always
+    expose:
+      - "6379"
+    networks:
+      - shieldauth-net
+  
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: shieldauth-api
+    restart: always
+    env_file:
+      - .env
+    environment:
+      - DB_HOST=db
+      - REDIS_HOST=redis
     ports:
-      - "6379:6379"
+      - "8080:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
     networks:
       - shieldauth-net
 
