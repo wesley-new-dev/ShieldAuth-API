@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"text/template"
 	"time"
+	"context"
 
 	"ShieldAuth-API/internal/domain"
 	"ShieldAuth-API/internal/response"
@@ -15,53 +16,60 @@ import (
 	"ShieldAuth-API/internal/ui"
 )
 
+type LoginServiceInterface interface {
+	VerifyLoginFunction(ctx context.Context, input service.LoginInput) (int, error)
+}
+type RateLimiter interface {
+	CheckLimit(ctx context.Context, key string, maxAttemtps int, window time.Duration) (bool, error)
+	ResetLimit(ctx context.Context, key string) error
+}
 
 type RegisterHandler struct {
-	Service *service.Register
+	Service *service.RegisterService
 }
 type LoginHandler struct {
-	Service *service.VerifyLogin
-	Limiter *security.RedisLimiter
+	Service LoginServiceInterface
+	Limiter RateLimiter
 }
 type RequestHandler struct {
-	service service.Service
+	Service *service.RequestResetService
 }
 type ValidTokenHandler struct {
-	service service.Service
+	Service *service.ValidTokenService
 }
 
 
-func NewRegisterHanlder(service *service.Register) *RegisterHandler {
+func NewRegisterHanlder(service *service.RegisterService) *RegisterHandler {
 	return &RegisterHandler{
 		Service: service,
 	}
 }
-func NewLoginHandler(service *service.VerifyLogin, limiter *security.RedisLimiter) *LoginHandler {
+func NewLoginHandler(service LoginServiceInterface, limiter RateLimiter) *LoginHandler {
 	return &LoginHandler{
 		Service: service,
 		Limiter: limiter,
 	}
 }
-func NewRequestHandler(s service.Service) *RequestHandler {
+func NewRequestHandler(s *service.RequestResetService) *RequestHandler {
 	return &RequestHandler{
-		service: s,
+		Service: s,
 	}
 }
-func NewValidTokenHandler(s service.Service) *ValidTokenHandler {
+func NewValidTokenHandler(s *service.ValidTokenService) *ValidTokenHandler {
 	return &ValidTokenHandler{
-		service: s,
+		Service: s,
 	}
 }
 
 
 type RegisterRequest struct {
-	Name string `json:"name" validate:"required"`
-	Email string `json:"email" validate:"required"`
-	Password string `json:"password" validate:"required"`
+	Name 		string `json:"name"`
+	Email 		string `json:"email"`
+	Password 	string `json:"password"`
 }
 type LoginRequest struct {
-	NameOrEmail string `json:"nameOrEmail" validate:"required"`
-	Password string `json:"password" validate:"required"`
+	NameOrEmail 	string `json:"nameOrEmail"`
+	Password 		string `json:"password"`
 }
 
 
@@ -74,7 +82,7 @@ func (handler *RegisterHandler) RegisterHandler(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	if r.Method == http.MethodPost {
+	if r.Method != http.MethodPost {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
 	}
@@ -85,7 +93,7 @@ func (handler *RegisterHandler) RegisterHandler(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	input := service.RegisterData{
+	input := service.RegisterInput{
 		Name: req.Name,
 		Email: req.Email,
 		Password: req.Password,
@@ -102,26 +110,26 @@ func (handler *RegisterHandler) RegisterHandler(w http.ResponseWriter, r *http.R
 }
 
 
-func (login *LoginHandler) HandlerLogin(w http.ResponseWriter, r *http.Request) {
+func (h *LoginHandler) HandlerLogin(w http.ResponseWriter, r *http.Request) {
 
 	if r.Method == http.MethodOptions {
 		w.WriteHeader(http.StatusOK)
 		return
 	}
 
-	if r.Method == http.MethodPost {
+	if r.Method != http.MethodPost {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
 	}
 
 	var req LoginRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		response.Error(w, http.StatusBadRequest, "Invalid credentials", err)
+		response.Error(w, http.StatusBadRequest, "Malformed JSON request body", err)
 		return
 	}
 
 	key := "login-attempt:" + req.NameOrEmail
-	allowed, err := login.Limiter.CheckLimit(r.Context(), key, 5, 10*time.Minute)
+	allowed, err := h.Limiter.CheckLimit(r.Context(), key, 5, 10*time.Minute)
 	if err != nil {
 		response.Error(w, http.StatusInternalServerError, "Internal server error", err)
 		return
@@ -132,28 +140,27 @@ func (login *LoginHandler) HandlerLogin(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	input := service.LoginData{
+	input := service.LoginInput{
 		Name: req.NameOrEmail,
 		Email: req.NameOrEmail,
 		Password: req.Password,
 	}
 
-	err, id := login.Service.VerifyLoginFunction(r.Context(), input)
+	id, err := h.Service.VerifyLoginFunction(r.Context(), input)
 	if err != nil {
 		MapServiceError(w, err)
 		return
 	}
 
-	login.Limiter.ResetLimit(r.Context(), "login-attempt:"+req.NameOrEmail)
-
 	tokenJwtString, err := security.TokenJWT(id)
 	if err != nil {
-		response.Error(w, http.StatusInternalServerError, "error trying to create a token", err)
+		response.Error(w, http.StatusInternalServerError, "Failed to generate authentication session", err)
 		return
 	}
 
+	_ = h.Limiter.ResetLimit(r.Context(), key)
+
 	response.Json(w, http.StatusOK, map[string]string{"token": tokenJwtString})
-	
 }
 
 
@@ -178,7 +185,7 @@ func (h *RequestHandler) RequestReset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	token, err := h.service.RequestReset(r.Context(), req.Email)
+	token, err := h.Service.RequestReset(r.Context(), req.Email)
 	if err != nil {
 		MapServiceError(w, err)
 		return
@@ -210,7 +217,7 @@ func (h *ValidTokenHandler) ValidToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, err := h.service.ValidToken(r.Context(), token)
+	err := h.Service.ValidToken(r.Context(), token)
 	if err != nil {
 		MapServiceError(w, err)
 		return
