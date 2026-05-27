@@ -3,19 +3,19 @@ package service
 type RegisterInput struct {
 	Name     string
 	Email    string
-	Password string
+	Password []byte
 }
 
 type LoginInput struct {
 	Name     string
 	Email    string
-	Password string
+	Password []byte
 }
 
 type ResetPasswordInput struct {
 	Token           string
-	NewPasword      string
-	ConfirmPassword string
+	NewPassword     []byte
+	ConfirmPassword []byte
 }
 
 type ChangeNameInput struct {
@@ -30,12 +30,12 @@ type ChangeEmailInput struct {
 	CurrentEmail    string
 	NewEmail        string
 	ConfirmNewEmail string
-	Password        string
+	Password        []byte
 }
 
 type ChangePasswordInput struct {
 	UserID 				int
-	CurrentPassword 	string
-	NewPassword 		string
-	ConfirmPassword 	string
+	CurrentPassword 	[]byte
+	NewPassword 		[]byte
+	ConfirmPassword 	[]byte
 }
