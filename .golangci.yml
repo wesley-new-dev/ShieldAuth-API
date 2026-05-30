@@ -1,0 +1,28 @@
+run:
+  timemout: 5m
+  modules-download-mode: readonly
+
+linters-settings:
+  govet:
+    check-shadowing: true
+  gosec:
+    includes:
+      - G101
+      - G201
+      - G304
+      - G401
+
+linters:
+  disable-all: true
+  enable:
+    - govet
+    - errcheck
+    - gosec
+    - staticcheck
+    - bodyclose
+    - rowserrcheck
+
+issues:
+  exclude-use-default: false
+  may-issues-per-linter: 0
+  max-same-issues: 0
