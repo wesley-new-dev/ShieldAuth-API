@@ -1,21 +1,19 @@
 package domain
 
 import (
-	"strings"
 	"net/mail"
-
-	"golang.org/x/crypto/bcrypt"
+	"strings"
 )
 
 type User struct {
 	Id 				int
 	Name 			string
 	Email 			string
-	PasswordHash 	string
+	PasswordHash 	[]byte
 }
 
 
-func NewUser(name, email, passwordHash string) (*User, error) {
+func NewUser(name, email string, passwordHash []byte) (*User, error) {
 	cleanName := strings.TrimSpace(name)
 	cleanEmail := strings.TrimSpace(strings.ToLower(email))
 
@@ -35,10 +33,10 @@ func NewUser(name, email, passwordHash string) (*User, error) {
 }
 
 func RestoreUser(
-	id int,
-	name string,
-	email string,
-	passwordHash string,
+	id 				int,
+	name 			string,
+	email 			string,
+	passwordHash 	[]byte,
 ) *User {
 	return &User{
 		Id: id,
@@ -92,10 +90,6 @@ func (u *User) ChangeName(currentName, newName string) error {
 
 	u.Name = newName
 	return nil
-}
-
-func (u *User) CheckPassword(password string) error {
-	return bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(password))
 }
 
 func isValidEmail(email string) bool {
