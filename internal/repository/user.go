@@ -1,12 +1,11 @@
 package repository
 
 import (
-	"context"
-	"database/sql"
 	"errors"
+	"context"
 	"fmt"
 	"log"
-	"time"
+	"database/sql"
 
 	"ShieldAuth-API/internal/domain"
 
@@ -19,7 +18,7 @@ import (
 type RegisterStruct struct {
 	Database *sql.DB
 }
-type VerifyLoginStruct struct {
+type MySQLUserRepository struct {
 	Database *sql.DB
 }
 type ChangeNameStruct struct {
@@ -44,6 +43,9 @@ type DeleteAccountStruct struct {
 type SessionAndAudit struct {
 	Database *sql.DB
 }
+type ChangePasswordStruct struct {
+	Database *sql.DB
+}
 
 
 func NewRegisterStruct(database *sql.DB) *RegisterStruct {
@@ -51,8 +53,8 @@ func NewRegisterStruct(database *sql.DB) *RegisterStruct {
 		Database: database,
 	}
 }
-func NewVerifyLoginStruct(database *sql.DB) *VerifyLoginStruct {
-	return &VerifyLoginStruct{
+func NewMySQLUserRepository(database *sql.DB) *MySQLUserRepository {
+	return &MySQLUserRepository{
 		Database: database,
 	}
 }
@@ -86,33 +88,38 @@ func NewValidTokenStruct(database *sql.DB) *ValidTokenStruct {
 		Database: database,
 	}
 }
-
-
-func (register *RegisterStruct) Register(ctx context.Context, name, email, password string) error {
-	u := &domain.User{
-		Name: name,
-		Email: email,
-		PasswordHash: password,
+func NewChangePasswordStruct(database *sql.DB) *ChangePasswordStruct {
+	return &ChangePasswordStruct{
+		Database: database,
 	}
+}
 
+
+func (register *RegisterStruct) Create(ctx context.Context, u *domain.User) error {
 	_, err := register.Database.ExecContext(ctx, "INSERT INTO users (name, email, password_hash) VALUES (?, ?, ?)", u.Name, u.Email, u.PasswordHash)
 	if err != nil {
-		if mySQLError, ok := errors.AsType[*mysql.MySQLError](err); ok {
-			if mySQLError.Number == 1062 {
+		if mySqlError, ok := errors.AsType[*mysql.MySQLError](err); ok {
+			if mySqlError.Number == 1062 {
 				return domain.ErrEmailAlreadyExists
 			}
 		}
 		return fmt.Errorf("Repository error: failed to insert user: %w", err)
 	}
+
 	return nil
 }
 
 
-func (loginStruct *VerifyLoginStruct) GetByCredentials(ctx context.Context, u domain.User) (*domain.User, error) {
-	user := &domain.User{}
+func (r *MySQLUserRepository) GetByIdentifier(ctx context.Context, identifier string) (*domain.User, error) {
+	var dbUser struct {
+		ID 				int
+		Name 			string
+		Email 			string
+		PasswordHash 	[]byte
+	}
 
 	query := "SELECT id, name, email, password_hash FROM users WHERE name = ? OR email = ? LIMIT 1"
-	err := loginStruct.Database.QueryRowContext(ctx, query, u.Name, u.Email).Scan(&user.Id, &user.Name, &user.Email, &user.PasswordHash)
+	err := r.Database.QueryRowContext(ctx, query, identifier, identifier).Scan(&dbUser.ID, &dbUser.Name, &dbUser.Email, &dbUser.PasswordHash)
 	if err != nil {	
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, domain.ErrUserNotFound
@@ -120,18 +127,18 @@ func (loginStruct *VerifyLoginStruct) GetByCredentials(ctx context.Context, u do
 		return nil, err
 	}
 
-	return user, nil
+	return domain.RestoreUser(dbUser.ID, dbUser.Name, dbUser.Email, dbUser.PasswordHash), nil
 }
 
 
-func (changeName *ChangeNameStruct) GetID(ctx context.Context, id int) (*domain.User, error) {
-	var test struct {
+func (r *ChangeNameStruct) GetForChangeName(ctx context.Context, id int) (*domain.User, error) {
+	var result struct {
 		ID int
 		Name string
 	}
-
-	query := "SELECT id, name FROM users WHERE id = ?"
-	err := changeName.Database.QueryRowContext(ctx, query, id).Scan(&test.ID, &test.Name)
+ 
+	const query = `SELECT id, name FROM users WHERE id = ?`
+	err := r.Database.QueryRowContext(ctx, query, id).Scan(&result.ID, &result.Name)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, domain.ErrUserNotFound
@@ -139,13 +146,18 @@ func (changeName *ChangeNameStruct) GetID(ctx context.Context, id int) (*domain.
 		return nil, err
 	}
 
-	return domain.RestoreUser(test.ID, test.Name, "", ""), nil
+	return domain.RestoreUser(result.ID, result.Name, "", []byte("")), nil
 }
+
 
 func (changeName *ChangeNameStruct) UpdateName(ctx context.Context, user *domain.User) error {
 	query := "UPDATE users SET name = ? WHERE id = ?"
 	_, err := changeName.Database.ExecContext(ctx, query, user.Name, user.Id)
-	return err
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 
@@ -153,7 +165,7 @@ func (changeEmail *ChangeEmailStruct) GetID(ctx context.Context, id int) (*domai
 	var test struct {
 		ID int
 		Email string
-		PasswordHash string
+		PasswordHash []byte
 	}
 
 	query := "SELECT id, email, password_hash FROM users WHERE id = ?"
@@ -184,7 +196,7 @@ func(r *RequestStruct) GetByEmail(ctx context.Context, email string) (*domain.Us
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, domain.ErrUserNotFound
 		}
-		return nil, fmt.Errorf("get user by email: %w", err)
+		return nil, err
 	}
 
 	return user, nil
@@ -233,33 +245,10 @@ func (deleteAccount *DeleteAccountStruct) DeleteAccount(ctx context.Context, ema
 }
 
 
-func RemoveExpiredToken(database *sql.DB) error {
-
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	result, err := database.ExecContext(ctx, "DELETE FROM reset_password WHERE expires_at < NOW() OR used = TRUE")
-	if err != nil {
-		return err
-	}
-
-	rows, _ := result.RowsAffected()
-	if rows > 0 {
-		log.Printf("REMOVED %d expired or used tokens", rows)
-	}
-
-	return nil
-}
-
-
-func (r *ResetPasswordStruct) UpdatePassword(ctx context.Context, userID string, passwordHash string) error {
-	
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-
+func (r *ResetPasswordStruct) UpdatePassword(ctx context.Context, userID string, passwordHash []byte) error {
 	_, err := r.Database.ExecContext(ctx, `UPDATE users SET password_hash = ? WHERE id = ?`, passwordHash, userID)
 	if err != nil {
-		return fmt.Errorf("update password failed: %w", err)
+		return err
 	}
 
 	return nil
@@ -267,10 +256,6 @@ func (r *ResetPasswordStruct) UpdatePassword(ctx context.Context, userID string,
 
 
 func (s *SessionAndAudit) InsertIntoLoginAudits(ctx context.Context, email string, success bool, failureReason string) error {
-	
-	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
-	defer cancel()
-
 	_, err := s.Database.ExecContext(ctx, `INSERT INTO login_attempts_audit (email, success, failure_reason, attempted_at) VALUES (?, ?, ?, NOW())`, email, success, failureReason)
 	if err != nil {
 		return fmt.Errorf("insert login audit failed: %w", err)
@@ -283,4 +268,39 @@ func (s *SessionAndAudit) InsertIntoLoginAudits(ctx context.Context, email strin
 func (s *SessionAndAudit) CreateSession(ctx context.Context, userID int, refreshTokenHash string) error {
 	_, err := s.Database.ExecContext(ctx, `INSERT INTO sessions (user_id, refresh_token_hash, revoked, expires_at, created_at) VALUES (?, ?, false, DATE_ADD(NOW(), INTERNAL 7 DAY), NOW())`, userID, refreshTokenHash)
 	return err
+}
+
+func (changePassword *ChangePasswordStruct) FindById(ctx context.Context, id int) (*domain.User, error) {
+	var user domain.User
+
+	query := `SELECT id, name, email, password_hash FROM users WHERE id = ?`
+	err := changePassword.Database.QueryRowContext(ctx, query, id).Scan(&user.Id, &user.Name, &user.Email, &user.PasswordHash)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, fmt.Errorf("user not found")
+		}
+
+		return nil, err
+	}
+	
+	return &user, nil
+}
+
+func (changePassword *ChangePasswordStruct) UpdatePasswordHash(ctx context.Context, id int, hash []byte) error {
+	query := `UPDATE users SET password_hash = ? WHERE id = ?`
+	result, err := changePassword.Database.ExecContext(ctx, query, hash, id)
+	if err != nil {
+		return err
+	}
+
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+
+	if rows == 0 {
+		return fmt.Errorf("user not found")
+	}
+
+	return nil
 }
