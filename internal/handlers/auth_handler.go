@@ -1,13 +1,12 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/url"
 	"text/template"
 	"time"
-	"context"
 
 	"ShieldAuth-API/internal/domain"
 	"ShieldAuth-API/internal/response"
@@ -16,6 +15,7 @@ import (
 	"ShieldAuth-API/internal/ui"
 )
 
+
 type LoginServiceInterface interface {
 	VerifyLoginFunction(ctx context.Context, input service.LoginInput) (int, error)
 }
@@ -23,6 +23,7 @@ type RateLimiter interface {
 	CheckLimit(ctx context.Context, key string, maxAttemtps int, window time.Duration) (bool, error)
 	ResetLimit(ctx context.Context, key string) error
 }
+
 
 type RegisterHandler struct {
 	Service *service.RegisterService
@@ -33,6 +34,7 @@ type LoginHandler struct {
 }
 type RequestHandler struct {
 	Service *service.RequestResetService
+	Limiter RateLimiter
 }
 type ValidTokenHandler struct {
 	Service *service.ValidTokenService
@@ -65,27 +67,26 @@ func NewValidTokenHandler(s *service.ValidTokenService) *ValidTokenHandler {
 type RegisterRequest struct {
 	Name 		string `json:"name"`
 	Email 		string `json:"email"`
-	Password 	string `json:"password"`
+	Password 	security.SecretBytes `json:"password"`
 }
 type LoginRequest struct {
 	NameOrEmail 	string `json:"nameOrEmail"`
-	Password 		string `json:"password"`
+	Password 		security.SecretBytes `json:"password"`
 }
 
 
 var tmpl = template.Must(template.ParseFS(ui.Files, "templates/reset.html"))
 
+
 func (handler *RegisterHandler) RegisterHandler(w http.ResponseWriter, r *http.Request) {
 
-	if r.Method == http.MethodOptions {
-		w.WriteHeader(http.StatusOK)
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	if r.Method != http.MethodPost {
-		w.WriteHeader(http.StatusMethodNotAllowed)
-		return
-	}
+	r.Body = http.MaxBytesReader(w, r.Body, 1024*4)
+	defer r.Body.Close()
 
 	var req RegisterRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -99,6 +100,8 @@ func (handler *RegisterHandler) RegisterHandler(w http.ResponseWriter, r *http.R
 		Password: req.Password,
 	}
 
+	defer security.ZeroMemory(input.Password)
+
 	err := handler.Service.RegisterFunction(r.Context(), input)
 	if err != nil {
 		MapServiceError(w, err)
@@ -106,21 +109,18 @@ func (handler *RegisterHandler) RegisterHandler(w http.ResponseWriter, r *http.R
 	}
 
 	response.Json(w, http.StatusCreated, map[string]string{"message": "success"})
-
 }
 
 
 func (h *LoginHandler) HandlerLogin(w http.ResponseWriter, r *http.Request) {
 
-	if r.Method == http.MethodOptions {
-		w.WriteHeader(http.StatusOK)
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	if r.Method != http.MethodPost {
-		w.WriteHeader(http.StatusMethodNotAllowed)
-		return
-	}
+	r.Body = http.MaxBytesReader(w, r.Body, 1024*4)
+	defer r.Body.Close()
 
 	var req LoginRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -129,14 +129,14 @@ func (h *LoginHandler) HandlerLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	key := "login-attempt:" + req.NameOrEmail
-	allowed, err := h.Limiter.CheckLimit(r.Context(), key, 5, 10*time.Minute)
+	allowed, err := h.Limiter.CheckLimit(r.Context(), key, 3, 10*time.Minute)
 	if err != nil {
 		response.Error(w, http.StatusInternalServerError, "Internal server error", err)
 		return
 	}
 
 	if !allowed {
-		response.Error(w, http.StatusTooManyRequests, "Too many requests, try again later", err)
+		response.Error(w, http.StatusTooManyRequests, "Too many attempts. Please again later", err)
 		return
 	}
 
@@ -145,6 +145,8 @@ func (h *LoginHandler) HandlerLogin(w http.ResponseWriter, r *http.Request) {
 		Email: req.NameOrEmail,
 		Password: req.Password,
 	}
+
+	defer security.ZeroMemory(input.Password)
 
 	id, err := h.Service.VerifyLoginFunction(r.Context(), input)
 	if err != nil {
@@ -166,13 +168,8 @@ func (h *LoginHandler) HandlerLogin(w http.ResponseWriter, r *http.Request) {
 
 func (h *RequestHandler) RequestReset(w http.ResponseWriter, r *http.Request) {
 
-	if r.Method == http.MethodOptions {
-		w.WriteHeader(http.StatusOK)
-		return
-	}
-
 	if r.Method != http.MethodPost {
-		w.WriteHeader(http.StatusMethodNotAllowed)
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
@@ -185,11 +182,25 @@ func (h *RequestHandler) RequestReset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	key := "request-reset-password-attempt:" + req.Email
+	allowed, err := h.Limiter.CheckLimit(r.Context(), key, 5, 12*time.Hour)
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "Internal server error", err)
+		return
+	}
+
+	if !allowed {
+		http.Error(w, "Too many attempts. Please again later", http.StatusTooManyRequests)
+		return
+	}
+
 	token, err := h.Service.RequestReset(r.Context(), req.Email)
 	if err != nil {
 		MapServiceError(w, err)
 		return
 	}
+
+	_ = h.Limiter.ResetLimit(r.Context(), key)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{
@@ -200,18 +211,12 @@ func (h *RequestHandler) RequestReset(w http.ResponseWriter, r *http.Request) {
 
 func (h *ValidTokenHandler) ValidToken(w http.ResponseWriter, r *http.Request) {
 
-	if r.Method == http.MethodOptions {
-		w.WriteHeader(http.StatusOK)
-		return
-	}
-
 	if r.Method != http.MethodGet {
-		w.WriteHeader(http.StatusMethodNotAllowed)
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
 	token := r.URL.Query().Get("token")
-	fmt.Println("token: ", token)
 	if token == "" {
 		MapServiceError(w, domain.ErrInvalidToken)
 		return
