@@ -61,6 +61,17 @@
                 <span id="authentication" class="info-value">Disabled</span>
             </div>
             <span id="change-password" class="btn-action">Change Password</span>
+
+            <div id="div-change-password-window" class="modal-subview hidden">
+                <span class="modal-title" id="change-password">CHANGE PASSWORD</span>
+                <form method="post" id="formChangePassword">
+                    <input type="password" id="current_password" name="currentPassword" placeholder="Current password" required>
+                    <input type="password" id="new_password" name="newPassword" placeholder="New password" required>
+                    <input type="password" id="confirm_new_password" name="confirmNewPassword" placeholder="Confirm new password" required>
+                    <button type="submit" id="saveNewPassword">CHANGE PASSWORD</button>
+                </form>
+                 <span id="leaveChangePassword" class="btn-leave">CANCEL</span>
+            </div>
             <span id="last-change-password" class="info-date"></span>
         </div>
 
