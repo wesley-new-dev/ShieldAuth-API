@@ -1,8 +1,9 @@
 package middleware
 
 import (
-	"net/http"
 	"log"
+	"net/http"
+	"runtime/debug"
 	"time"
 )
 
@@ -10,8 +11,8 @@ func Recovery(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer func() {
 			if err := recover(); err != nil {
-				log.Printf("PANIC: Recovered from fatal error: %v", err)
-				http.Error(w, "SERVER ERROR", http.StatusInternalServerError)
+				log.Printf("PANIC [%s %s]: %v\n%s", r.Method, r.URL.Path, err, debug.Stack())
+				http.Error(w, "Server error", http.StatusInternalServerError)
 			}
 		}()
 
