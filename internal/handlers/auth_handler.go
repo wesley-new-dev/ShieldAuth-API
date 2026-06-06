@@ -13,6 +13,7 @@ import (
 	"ShieldAuth-API/internal/security"
 	"ShieldAuth-API/internal/service"
 	"ShieldAuth-API/internal/ui"
+	"ShieldAuth-API/internal/request"
 )
 
 
@@ -52,9 +53,10 @@ func NewLoginHandler(service LoginServiceInterface, limiter RateLimiter) *LoginH
 		Limiter: limiter,
 	}
 }
-func NewRequestHandler(s *service.RequestResetService) *RequestHandler {
+func NewRequestHandler(s *service.RequestResetService, limiter RateLimiter) *RequestHandler {
 	return &RequestHandler{
 		Service: s,
+		Limiter: limiter,
 	}
 }
 func NewValidTokenHandler(s *service.ValidTokenService) *ValidTokenHandler {
@@ -89,8 +91,8 @@ func (handler *RegisterHandler) RegisterHandler(w http.ResponseWriter, r *http.R
 	defer r.Body.Close()
 
 	var req RegisterRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		response.Error(w, http.StatusBadRequest, "Invalid credentials", err)
+	if err := request.DecodeJSONBody(w, r, &req); err != nil {
+		response.Error(w, http.StatusBadRequest, "Malformed JSON request body", err)
 		return
 	}
 
@@ -123,7 +125,7 @@ func (h *LoginHandler) HandlerLogin(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
 
 	var req LoginRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := request.DecodeJSONBody(w, r, &req); err != nil {
 		response.Error(w, http.StatusBadRequest, "Malformed JSON request body", err)
 		return
 	}
@@ -136,7 +138,7 @@ func (h *LoginHandler) HandlerLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if !allowed {
-		response.Error(w, http.StatusTooManyRequests, "Too many attempts. Please again later", err)
+		response.Error(w, http.StatusTooManyRequests, "Too many attempts. Please try again later.", err)
 		return
 	}
 
@@ -177,8 +179,8 @@ func (h *RequestHandler) RequestReset(w http.ResponseWriter, r *http.Request) {
 		Email string `json:"email"`
 	}
 
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		response.Error(w, http.StatusBadRequest, "invalid request", err)
+	if err := request.DecodeJSONBody(w, r, &req); err != nil {
+		response.Error(w, http.StatusBadRequest, "Malformed JSON request body", err)
 		return
 	}
 
@@ -190,7 +192,7 @@ func (h *RequestHandler) RequestReset(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if !allowed {
-		http.Error(w, "Too many attempts. Please again later", http.StatusTooManyRequests)
+		http.Error(w, "Too many attempts. Please try again later", http.StatusTooManyRequests)
 		return
 	}
 
