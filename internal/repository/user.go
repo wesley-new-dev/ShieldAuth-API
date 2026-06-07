@@ -4,14 +4,12 @@ import (
 	"errors"
 	"context"
 	"fmt"
-	"log"
 	"database/sql"
 
 	"ShieldAuth-API/internal/domain"
 
 	"github.com/go-sql-driver/mysql"
 	"github.com/redis/go-redis/v9"
-	"golang.org/x/crypto/bcrypt"
 )
 
 
@@ -131,10 +129,30 @@ func (r *MySQLUserRepository) GetByIdentifier(ctx context.Context, identifier st
 }
 
 
+func (r *MySQLUserRepository) Rehash(ctx context.Context, id int, hash []byte) error {
+	query := "UPDATE users SET password_hash = ? WHERE id = ?"
+	result, err := r.Database.ExecContext(ctx, query, hash, id)
+	if err != nil {
+		return domain.ErrUserNotFound
+	}
+
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return domain.ErrInternal
+	}
+
+	if affected != 1 {
+		return err
+	}
+
+	return nil
+}
+
+
 func (r *ChangeNameStruct) GetForChangeName(ctx context.Context, id int) (*domain.User, error) {
 	var result struct {
-		ID int
-		Name string
+		ID 		int
+		Name 	string
 	}
  
 	const query = `SELECT id, name FROM users WHERE id = ?`
@@ -146,14 +164,23 @@ func (r *ChangeNameStruct) GetForChangeName(ctx context.Context, id int) (*domai
 		return nil, err
 	}
 
-	return domain.RestoreUser(result.ID, result.Name, "", []byte("")), nil
+	return domain.RestoreUser(result.ID, result.Name, "", nil), nil
 }
 
 
 func (changeName *ChangeNameStruct) UpdateName(ctx context.Context, user *domain.User) error {
 	query := "UPDATE users SET name = ? WHERE id = ?"
-	_, err := changeName.Database.ExecContext(ctx, query, user.Name, user.Id)
+	result, err := changeName.Database.ExecContext(ctx, query, user.Name, user.Id)
 	if err != nil {
+		return err
+	}
+
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+
+	if affected != 1 {
 		return err
 	}
 
@@ -163,9 +190,9 @@ func (changeName *ChangeNameStruct) UpdateName(ctx context.Context, user *domain
 
 func (changeEmail *ChangeEmailStruct) GetID(ctx context.Context, id int) (*domain.User, error) {
 	var test struct {
-		ID int
-		Email string
-		PasswordHash []byte
+		ID 				int
+		Email 			string
+		PasswordHash 	[]byte
 	}
 
 	query := "SELECT id, email, password_hash FROM users WHERE id = ?"
@@ -183,7 +210,17 @@ func (changeEmail *ChangeEmailStruct) GetID(ctx context.Context, id int) (*domai
 
 func (changeEmail *ChangeEmailStruct) UpdateEmail(ctx context.Context, user *domain.User) error {
 	query := "UPDATE users SET email = ? WHERE id = ?"
-	_, err := changeEmail.Database.ExecContext(ctx, query, user.Email, user.Id)
+	result, err := changeEmail.Database.ExecContext(ctx, query, user.Email, user.Id)
+
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+
+	if affected != 1 {
+		return err
+	}
+
 	return err
 }
 
@@ -203,51 +240,56 @@ func(r *RequestStruct) GetByEmail(ctx context.Context, email string) (*domain.Us
 }
 
 
-func (deleteAccount *DeleteAccountStruct) DeleteAccount(ctx context.Context, email, password string) error {
+func (deleteAccount *DeleteAccountStruct) Delete(ctx context.Context, id int) error {
 
-	tx, err := deleteAccount.Database.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
-	var verifyEmail bool
-	var verifyPassword string
-
-	err = tx.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM users WHERE email = ?)", email).Scan(&verifyEmail)
+	result, err := deleteAccount.Database.ExecContext(ctx, "DELETE FROM users WHERE id = ?", id)
 	if err != nil {
 		return err
 	}
 
-	err = tx.QueryRowContext(ctx, "SELECT password FROM users WHERE email = ?", email).Scan(&verifyPassword)
+	affected, err := result.RowsAffected()
 	if err != nil {
 		return err
 	}
 
-	passwordHash := bcrypt.CompareHashAndPassword([]byte(verifyPassword), []byte(password))
-
-	if passwordHash == nil && verifyEmail {
-		_, err = tx.ExecContext(ctx, "DELETE FROM users WHERE password = ?", passwordHash)
-		if err != nil {
-			return fmt.Errorf("Repository error: %w", err)
-		}
-
-	} else {
-		log.Println("ERROR: ", passwordHash)
-		return passwordHash
+	if affected != 1 {
+		return err
 	}
 
-	err = tx.Commit()
-	if err != nil {
-		return fmt.Errorf("Repository error: %w", err)
-	}
 	return nil
 }
 
 
-func (r *ResetPasswordStruct) UpdatePassword(ctx context.Context, userID string, passwordHash []byte) error {
-	_, err := r.Database.ExecContext(ctx, `UPDATE users SET password_hash = ? WHERE id = ?`, passwordHash, userID)
+func (deleteAccount *DeleteAccountStruct) GetHashById(ctx context.Context, id int, passwordHash []byte) (*domain.User, error) {
+	var result struct {
+		Id 				int
+		passwordHash 	[]byte
+	}
+	query := "SELECT id, password_hash FROM users WHERE id = ?"
+	err := deleteAccount.Database.QueryRowContext(ctx, query, id, passwordHash).Scan(&result.Id, result.passwordHash)
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, domain.ErrUserNotFound
+		}
+		return nil, err
+	}
+
+	return domain.RestoreUser(result.Id, "", "", result.passwordHash), nil
+}
+
+
+func (r *ResetPasswordStruct) UpdatePassword(ctx context.Context, userID string, passwordHash []byte) error {
+	result, err := r.Database.ExecContext(ctx, `UPDATE users SET password_hash = ? WHERE id = ?`, passwordHash, userID)
+	if err != nil {
+		return err
+	}
+
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+
+	if affected != 1 {
 		return err
 	}
 
@@ -270,36 +312,40 @@ func (s *SessionAndAudit) CreateSession(ctx context.Context, userID int, refresh
 	return err
 }
 
-func (changePassword *ChangePasswordStruct) FindById(ctx context.Context, id int) (*domain.User, error) {
-	var user domain.User
 
-	query := `SELECT id, name, email, password_hash FROM users WHERE id = ?`
-	err := changePassword.Database.QueryRowContext(ctx, query, id).Scan(&user.Id, &user.Name, &user.Email, &user.PasswordHash)
+func (changePassword *ChangePasswordStruct) FindById(ctx context.Context, id int) (*domain.User, error) {
+	var result struct {
+		ID 				int
+		PasswordHash 	[]byte
+	}
+
+	query := `SELECT id, password_hash FROM users WHERE id = ?`
+	err := changePassword.Database.QueryRowContext(ctx, query, id).Scan(&result.ID, &result.PasswordHash)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, fmt.Errorf("user not found")
+			return nil, domain.ErrUserNotFound
 		}
-
 		return nil, err
 	}
 	
-	return &user, nil
+	return domain.RestoreUser(result.ID, "", "", result.PasswordHash), nil
 }
+
 
 func (changePassword *ChangePasswordStruct) UpdatePasswordHash(ctx context.Context, id int, hash []byte) error {
 	query := `UPDATE users SET password_hash = ? WHERE id = ?`
 	result, err := changePassword.Database.ExecContext(ctx, query, hash, id)
 	if err != nil {
-		return err
+		return domain.ErrUserNotFound
 	}
 
-	rows, err := result.RowsAffected()
+	affected, err := result.RowsAffected()
 	if err != nil {
 		return err
 	}
 
-	if rows == 0 {
-		return fmt.Errorf("user not found")
+	if affected == 1 {
+		return err
 	}
 
 	return nil
