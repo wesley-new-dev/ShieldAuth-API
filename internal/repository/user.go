@@ -266,7 +266,7 @@ func (deleteAccount *DeleteAccountStruct) GetHashById(ctx context.Context, id in
 		passwordHash 	[]byte
 	}
 	query := "SELECT id, password_hash FROM users WHERE id = ?"
-	err := deleteAccount.Database.QueryRowContext(ctx, query, id, passwordHash).Scan(&result.Id, result.passwordHash)
+	err := deleteAccount.Database.QueryRowContext(ctx, query, id).Scan(&result.Id, &result.passwordHash)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, domain.ErrUserNotFound
