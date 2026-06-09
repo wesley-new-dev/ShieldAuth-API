@@ -13,6 +13,7 @@ var dummyArgon2Hash = []byte("DPunA5HgdFJkHrryZptqsQLwmAB4NfaRoM/TiI3Elg01fD2iGX
 
 type LoginRepository interface {
 	GetByIdentifier(ctx context.Context, identifier string) (*domain.User, error)
+	Rehash(ctx context.Context, id int, hash []byte) error
 }
 
 type LoginService struct {
@@ -46,7 +47,7 @@ func (s *LoginService) VerifyLoginFunction(ctx context.Context, input LoginInput
 
 	user, err := s.repo.GetByIdentifier(ctx, identifier)
 	if err != nil {
-		_ = s.hasher.Compare(input.Password, dummyArgon2Hash)
+		_, _ = s.hasher.Compare(input.Password, dummyArgon2Hash)
 		return 0, domain.ErrInvalidCredentials
 	}
 
@@ -54,8 +55,20 @@ func (s *LoginService) VerifyLoginFunction(ctx context.Context, input LoginInput
 		return 0, err
 	}
 
-	if err := s.hasher.Compare(input.Password, user.PasswordHash); err != nil {
+	hashData, err := s.hasher.Compare(input.Password, user.PasswordHash)
+	if err != nil {
 		return 0, domain.ErrInvalidCredentials
+	}
+
+	if s.hasher.NeedsRehash(hashData.Memory, hashData.Iterations, hashData.Parallelism) {
+
+		newHash, err := s.hasher.Hash(input.Password)
+		if err != nil {
+
+			updateCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			_ = s.repo.Rehash(updateCtx, user.Id, newHash)
+		}
 	}
 
 	return user.Id, nil
