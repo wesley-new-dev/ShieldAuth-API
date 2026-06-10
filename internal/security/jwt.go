@@ -13,7 +13,7 @@ import (
 func TokenJWT(userID int) (string, error) {
 	claims := jwt.RegisteredClaims{
 		Subject: strconv.Itoa(userID),
-		ExpiresAt: jwt.NewNumericDate(time.Now().Add(24 * time.Hour)),
+		ExpiresAt: jwt.NewNumericDate(time.Now().Add(15 * time.Minute)),
 		IssuedAt: jwt.NewNumericDate(time.Now()),
 		ID: uuid.NewString(),
 	}
