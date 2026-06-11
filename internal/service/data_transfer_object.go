@@ -1,15 +1,15 @@
 package service
 
 type RegisterInput struct {
-	Name     string
-	Email    string
-	Password []byte
+	Name     	string
+	Email    	string
+	Password 	[]byte
 }
 
 type LoginInput struct {
-	Name     string
-	Email    string
-	Password []byte
+	Name     	string
+	Email    	string
+	Password 	[]byte
 }
 
 type ResetPasswordInput struct {
@@ -19,10 +19,10 @@ type ResetPasswordInput struct {
 }
 
 type ChangeNameInput struct {
-	ID             int
-	CurrentName    string
-	NewName        string
-	ConfirmNewName string
+	ID             	int
+	CurrentName    	string
+	NewName        	string
+	ConfirmNewName 	string
 }
 
 type ChangeEmailInput struct {
@@ -38,4 +38,14 @@ type ChangePasswordInput struct {
 	CurrentPassword 	[]byte
 	NewPassword 		[]byte
 	ConfirmPassword 	[]byte
+}
+
+type DeleteAccountInput struct {
+	UserID 				int
+	CurrentPassword 	[]byte
+}
+
+type LogOutInput struct {
+	UserID 				int
+	CurrentPassword 	[]byte
 }
