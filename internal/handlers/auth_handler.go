@@ -9,16 +9,17 @@ import (
 	"time"
 
 	"ShieldAuth-API/internal/domain"
+	"ShieldAuth-API/internal/request"
 	"ShieldAuth-API/internal/response"
 	"ShieldAuth-API/internal/security"
 	"ShieldAuth-API/internal/service"
 	"ShieldAuth-API/internal/ui"
-	"ShieldAuth-API/internal/request"
 )
 
 
 type LoginServiceInterface interface {
-	VerifyLoginFunction(ctx context.Context, input service.LoginInput) (int, error)
+	VerifyLoginFunction(ctx context.Context, input service.LoginInput) (int64, error)
+	CreateRefreshToken(ctx context.Context, userID int64, duration time.Duration) (string, error)
 }
 type RateLimiter interface {
 	CheckLimit(ctx context.Context, key string, maxAttemtps int, window time.Duration) (bool, error)
@@ -87,9 +88,6 @@ func (handler *RegisterHandler) RegisterHandler(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	r.Body = http.MaxBytesReader(w, r.Body, 1024*4)
-	defer r.Body.Close()
-
 	var req RegisterRequest
 	if err := request.DecodeJSONBody(w, r, &req); err != nil {
 		response.Error(w, http.StatusBadRequest, "Malformed JSON request body", err)
@@ -98,19 +96,46 @@ func (handler *RegisterHandler) RegisterHandler(w http.ResponseWriter, r *http.R
 
 	input := service.RegisterInput{
 		Name: req.Name,
-		Email: req.Email,
+		Email: 	req.Email,
 		Password: req.Password,
 	}
 
 	defer security.ZeroMemory(input.Password)
 
-	err := handler.Service.RegisterFunction(r.Context(), input)
+	id, err := handler.Service.RegisterFunction(r.Context(), input)
 	if err != nil {
 		MapServiceError(w, err)
 		return
 	}
 
-	response.Json(w, http.StatusCreated, map[string]string{"message": "success"})
+	tokenJwtString, err := security.TokenJWT(id)
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "Failed to generate authentication session", err)
+		return
+	}
+
+	validDays := 7
+	cookieDuration := time.Duration(validDays) * 24 * time.Hour
+	refreshTokenString, err := handler.Service.CreateRefreshToken(r.Context(), id, cookieDuration)
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "Failed to generate refresh session", err)
+		return
+	}
+
+	cookie := &http.Cookie{
+		Name: "refresh_token",
+		Value: refreshTokenString,
+		Expires: time.Now().Add(cookieDuration),
+		MaxAge: validDays * 24 * 60 * 60,
+		HttpOnly: true,
+		Secure: true,
+		SameSite: http.SameSiteStrictMode,
+		Path: "/",
+	}
+
+	http.SetCookie(w, cookie)
+
+	response.Json(w, http.StatusCreated, map[string]string{"token": tokenJwtString})
 }
 
 
@@ -120,9 +145,6 @@ func (h *LoginHandler) HandlerLogin(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-
-	r.Body = http.MaxBytesReader(w, r.Body, 1024*4)
-	defer r.Body.Close()
 
 	var req LoginRequest
 	if err := request.DecodeJSONBody(w, r, &req); err != nil {
@@ -161,6 +183,27 @@ func (h *LoginHandler) HandlerLogin(w http.ResponseWriter, r *http.Request) {
 		response.Error(w, http.StatusInternalServerError, "Failed to generate authentication session", err)
 		return
 	}
+
+	validDays := 7
+	cookieDuration := time.Duration(validDays) * 24 * time.Hour
+	refreshTokenString, err := h.Service.CreateRefreshToken(r.Context(), id, cookieDuration)
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "Failed to generate refresh session", err)
+		return
+	}
+
+	cookie := &http.Cookie{
+		Name: "refresh_token",
+		Value: refreshTokenString,
+		Expires: time.Now().Add(cookieDuration),
+		MaxAge: validDays * 24 * 60 * 60,
+		HttpOnly: true,
+		Secure: true,
+		SameSite: http.SameSiteStrictMode,
+		Path: "/",
+	}
+
+	http.SetCookie(w, cookie)
 
 	_ = h.Limiter.ResetLimit(r.Context(), key)
 
