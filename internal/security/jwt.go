@@ -10,9 +10,9 @@ import (
 )
 
 
-func TokenJWT(userID int) (string, error) {
+func TokenJWT(userID int64) (string, error) {
 	claims := jwt.RegisteredClaims{
-		Subject: strconv.Itoa(userID),
+		Subject: strconv.FormatInt(userID, 10),
 		ExpiresAt: jwt.NewNumericDate(time.Now().Add(15 * time.Minute)),
 		IssuedAt: jwt.NewNumericDate(time.Now()),
 		ID: uuid.NewString(),

@@ -6,7 +6,7 @@ import (
 )
 
 type User struct {
-	Id 				int
+	Id 				int64
 	Name 			string
 	Email 			string
 	PasswordHash 	[]byte
@@ -33,7 +33,7 @@ func NewUser(name, email string, passwordHash []byte) (*User, error) {
 }
 
 func RestoreUser(
-	id 				int,
+	id 				int64,
 	name 			string,
 	email 			string,
 	passwordHash 	[]byte,
