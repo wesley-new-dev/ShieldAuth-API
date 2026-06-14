@@ -6,7 +6,7 @@
     --border-color: #1a1a1a;
     --text-main: #ffffff;
     --text-muted: #888888;
-    --accent-blue: #ffffff; /* Mantendo o Pure Dark que você curte */
+    --accent-blue: #ffffff;
     --danger: #ff3333;
 }
 
@@ -61,7 +61,6 @@ body {
 
 .info-value { color: var(--text-muted); }
 
-/* Botões de Ação */
 .btn-action {
     display: block;
     font-size: 0.95rem;
@@ -74,7 +73,6 @@ body {
 
 .btn-action:hover { opacity: 0.6; }
 
-/* Janelas de Edição (Modais Embutidos) */
 .modal-subview {
     background: #111;
     border-radius: 12px;
@@ -91,7 +89,6 @@ body {
     color: var(--text-muted);
 }
 
-/* Inputs */
 input {
     width: 100%;
     background: #000;
@@ -110,7 +107,6 @@ input:focus {
     border-color: #666;
 }
 
-/* Botões de Confirmação */
 button {
     width: 100%;
     background: white;
@@ -125,13 +121,11 @@ button {
 
 button:active { transform: scale(0.98); }
 
-/* Danger Zone */
 .danger-zone { border-bottom: none; }
 .danger-text { font-size: 0.85rem; color: var(--text-muted); margin-bottom: 15px; }
 .btn-delete { color: var(--danger); cursor: pointer; font-weight: 600; font-size: 0.9rem; }
 #buttonDeleteAccount { background: var(--danger); color: white; }
 
-/* Erros */
 .error-text {
     display: block;
     color: var(--danger);
@@ -151,7 +145,6 @@ button:active { transform: scale(0.98); }
 
 .btn-leave:hover { color: white; }
 
-/* Utilitários */
 .hidden { display: none; }
 
 @keyframes fadeIn {

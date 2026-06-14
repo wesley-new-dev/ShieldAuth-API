@@ -50,7 +50,6 @@ header p {
     margin: 8px 0 25px 0;
 }
 
-/* Esconder o rádio padrão */
 input[type="radio"] {
     display: none;
 }
@@ -82,7 +81,6 @@ input[type="radio"] {
     color: var(--text-muted);
 }
 
-/* Prévia visual dentro do card */
 .theme-preview {
     height: 60px;
     border-radius: 8px;
@@ -105,7 +103,6 @@ input[type="radio"] {
 .light-preview .preview-line { background: #ddd; }
 .preview-line.short { width: 60%; }
 
-/* Efeito de Seleção (Quando o rádio está marcado) */
 input[type="radio"]:checked + .card-content {
     border-color: var(--accent-white);
     background: #1a1a1a;
@@ -117,7 +114,6 @@ input[type="radio"]:checked + .card-content .theme-name {
     color: white;
 }
 
-/* Footer */
 #theme-footer {
     margin-top: 30px;
     text-align: center;

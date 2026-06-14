@@ -21,7 +21,6 @@ body {
     overflow: hidden;
 }
 
-/* Fundo com grade de partículas */
 body::after {
     content: "";
     position: absolute;
@@ -32,7 +31,6 @@ body::after {
     opacity: 0.3;
 }
 
-/* Container Principal (Ajustado de div para main) */
 #login-card {
     background-color: var(--card-bg);
     padding: 2rem;
@@ -54,7 +52,6 @@ body::after {
     background: linear-gradient(90deg, transparent, #444, transparent);
 }
 
-/* Títulos */
 #welcomeBack {
     font-size: 0.65rem;
     letter-spacing: 4px;
@@ -74,7 +71,6 @@ body::after {
     -webkit-text-fill-color: transparent;
 }
 
-/* Estrutura de Formulários e Inputs */
 form, #div-sign-in, #emailForReset {
     display: flex;
     flex-direction: column;
@@ -92,7 +88,7 @@ input {
     outline: none;
     transition: all 0.3s ease;
     width: 100%;
-    box-sizing: border-box; /* Fundamental para não quebrar a largura */
+    box-sizing: border-box;
 }
 
 input:focus {
@@ -102,7 +98,6 @@ input:focus {
     transform: translateY(-1px);
 }
 
-/* Botões Estilizados */
 button {
     background: white;
     color: black;
@@ -125,7 +120,6 @@ button:active {
     transform: scale(0.98);
 }
 
-/* Links (Agora como botões transparentes para melhor UX) */
 .link-btn {
     background: transparent;
     color: var(--text-muted);
@@ -151,7 +145,6 @@ button:active {
     margin-top: 1rem;
 }
 
-/* Sistema de Alertas e Erros */
 .invisible {
     display: none;
 }
@@ -169,7 +162,6 @@ button:active {
     animation: shake 0.4s cubic-bezier(.36,.07,.19,.97) both;
 }
 
-/* Seção de Reset */
 #reset-section {
     border-top: 1px solid #222;
     margin-top: 20px;
@@ -185,7 +177,6 @@ button:active {
     display: block;
 }
 
-/* Animações */
 @keyframes slideUp {
     from { opacity: 0; transform: translateY(30px); }
     to { opacity: 1; transform: translateY(0); }

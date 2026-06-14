@@ -19,7 +19,6 @@ body {
     margin: 0;
 }
 
-/* Background estático de partículas */
 body::after {
     content: "";
     position: absolute;
@@ -57,7 +56,6 @@ body::after {
     margin-top: 5px;
 }
 
-/* Lista de Itens */
 #settings-options {
     display: flex;
     flex-direction: column;
@@ -124,7 +122,6 @@ body::after {
     transform: translateX(5px);
 }
 
-/* Botão de Voltar */
 #settings-footer {
     margin-top: 2rem;
     text-align: center;

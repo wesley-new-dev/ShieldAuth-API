@@ -1,46 +1,35 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;500;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
 
 :root {
-    --bg-color: #050505;
-    --card-bg: #0f0f0f;
-    --accent: #ffffff;
+    --bg-color: #000000;
+    --card-bg: #0a0a0a;
     --border-color: #1a1a1a;
-    --text-muted: #666;
+    --text-main: #ffffff;
+    --text-muted: #888888;
+    --danger: #ff3333;
 }
 
 body {
     background-color: var(--bg-color);
-    color: white;
+    color: var(--text-main);
     font-family: 'Inter', sans-serif;
     display: flex;
     justify-content: center;
-    align-items: center;
-    min-height: 100vh;
+    padding: 40px 20px;
     margin: 0;
-}
-
-/* Partículas de fundo */
-body::after {
-    content: "";
-    position: absolute;
-    width: 100%; height: 100%;
-    background-image: radial-gradient(#111 1px, transparent 1px);
-    background-size: 50px 50px;
-    z-index: -1;
 }
 
 #main {
     background-color: var(--card-bg);
-    width: 90%;
-    max-width: 500px;
+    width: 100%;
+    max-width: 550px;
     padding: 2.5rem;
-    border-radius: 24px;
+    border-radius: 16px;
     border: 1px solid var(--border-color);
-    box-shadow: 0 50px 100px rgba(0,0,0,0.9);
-    animation: fadeInDashboard 0.8s ease-out;
+    box-shadow: 0 40px 100px rgba(0, 0, 0, 0.8);
+    animation: fadeInDashboard 0.5s ease-out;
 }
 
-/* Header do Dashboard */
 #dashboard-header {
     display: flex;
     justify-content: space-between;
@@ -49,8 +38,9 @@ body::after {
 }
 
 #welcome {
-    font-size: 0.65rem;
-    letter-spacing: 3px;
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 2px;
     color: var(--text-muted);
     margin: 0;
 }
@@ -58,29 +48,30 @@ body::after {
 #user-name {
     font-size: 1.8rem;
     font-weight: 700;
-    margin: 5px 0 0 0;
+    margin: 6px 0 0;
+    letter-spacing: -1px;
 }
 
 #setting {
-    background: #151515;
-    color: white;
-    border: 1px solid #222;
-    padding: 8px 15px;
+    background: #111111;
+    color: var(--text-main);
+    border: 1px solid #222222;
     border-radius: 10px;
-    font-size: 0.8rem;
+    padding: 10px 14px;
+    font-size: 0.85rem;
+    font-weight: 500;
     cursor: pointer;
     display: flex;
     align-items: center;
     gap: 8px;
-    transition: all 0.3s;
+    transition: all 0.2s ease;
 }
 
 #setting:hover {
-    background: white;
-    color: black;
+    background: var(--text-main);
+    color: #000000;
 }
 
-/* Cards de Stats */
 #stats-grid {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -89,76 +80,176 @@ body::after {
 }
 
 .stat-card {
-    background: #000;
+    background: #000000;
+    border: 1px solid var(--border-color);
+    border-radius: 14px;
     padding: 20px;
-    border-radius: 16px;
-    border: 1px solid #1a1a1a;
+    transition: all 0.2s ease;
+}
+
+.stat-card:hover {
+    border-color: #2a2a2a;
+    transform: translateY(-2px);
 }
 
 .stat-label {
     display: block;
     font-size: 0.7rem;
-    color: var(--text-muted);
     text-transform: uppercase;
-    letter-spacing: 1px;
-    margin-bottom: 5px;
+    letter-spacing: 2px;
+    color: var(--text-muted);
+    margin-bottom: 8px;
 }
 
 .stat-value {
-    font-size: 1.1rem;
-    font-weight: 600;
+    font-size: 1.4rem;
+    font-weight: 700;
+    color: var(--text-main);
 }
 
-/* Atividade Recente */
+#recent-activity {
+    margin-bottom: 2rem;
+}
+
 #recent-activity h3 {
-    font-size: 0.9rem;
-    font-weight: 600;
-    margin-bottom: 15px;
-    color: #eee;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    color: var(--text-muted);
+    margin-bottom: 20px;
 }
 
 .activity-list {
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: 14px;
 }
 
 .activity-item {
     display: flex;
     align-items: center;
     gap: 12px;
-    font-size: 0.85rem;
-    color: #888;
+    color: var(--text-main);
+    font-size: 0.9rem;
 }
 
 .dot {
-    width: 6px;
-    height: 6px;
-    background: #333;
+    width: 8px;
+    height: 8px;
     border-radius: 50%;
+    background: #333333;
+    flex-shrink: 0;
 }
 
-.time { color: #444; margin-left: 5px; }
+.time {
+    color: var(--text-muted);
+}
 
-/* Footer */
 #dashboard-footer {
-    margin-top: 3rem;
-    border-top: 1px solid #1a1a1a;
+    border-top: 1px solid var(--border-color);
     padding-top: 1.5rem;
-    text-align: center;
 }
 
 #logout-btn {
-    color: #aa4444;
-    font-size: 0.8rem;
-    cursor: pointer;
+    display: inline-block;
+    color: var(--danger);
+    font-size: 0.9rem;
     font-weight: 600;
-    transition: 0.3s;
+    cursor: pointer;
+    transition: opacity 0.2s ease;
 }
 
-#logout-btn:hover { color: #ff3333; }
+#logout-btn:hover {
+    opacity: 0.7;
+}
+
+.modal-subview {
+    background: #111111;
+    border: 1px solid #222222;
+    border-radius: 12px;
+    padding: 20px;
+    margin-top: 20px;
+}
+
+.modal-title {
+    display: block;
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    color: var(--text-muted);
+    margin-bottom: 15px;
+    font-weight: 700;
+}
+
+#formLogOut {
+    display: flex;
+    flex-direction: column;
+}
+
+#currentPasswordLogOut {
+    width: 100%;
+    box-sizing: border-box;
+    background: #000000;
+    border: 1px solid #333333;
+    border-radius: 8px;
+    padding: 12px;
+    color: var(--text-main);
+    font-size: 0.9rem;
+    margin-bottom: 12px;
+    transition: border-color 0.2s ease;
+}
+
+#currentPasswordLogOut:focus {
+    outline: none;
+    border-color: #666666;
+}
+
+#buttonLogOut {
+    width: 100%;
+    background: var(--text-main);
+    color: #000000;
+    border: none;
+    border-radius: 8px;
+    padding: 12px;
+    font-size: 0.9rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: transform 0.1s ease, opacity 0.2s ease;
+}
+
+#buttonLogOut:hover {
+    opacity: 0.9;
+}
+
+#buttonLogOut:active {
+    transform: scale(0.98);
+}
+
+.btn-leave {
+    display: block;
+    text-align: center;
+    font-size: 0.75rem;
+    margin-top: 15px;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: color 0.2s ease;
+}
+
+.btn-leave:hover {
+    color: var(--text-main);
+}
+
+.hidden {
+    display: none;
+}
 
 @keyframes fadeInDashboard {
-    from { opacity: 0; transform: translateY(20px); }
-    to { opacity: 1; transform: translateY(0); }
+    from {
+        opacity: 0;
+        transform: translateY(12px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
 }
