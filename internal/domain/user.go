@@ -21,7 +21,8 @@ func NewUser(name, email string, passwordHash []byte) (*User, error) {
 		return nil, ErrInvalidCredentials
 	}
 
-	if !isValidEmail(cleanEmail) {
+	err := isValidEmail(email)
+	if err != nil {
 		return nil, ErrInvalidEmailFormat
 	}
 
@@ -63,9 +64,11 @@ func (u *User) ChangeEmail(currentEmail, newEmail, confirmNewEmail string) error
 		return ErrEmailIsTheSame
 	}
 
-	if !isValidEmail(newEmail) {
+	err := isValidEmail(newEmail)
+	if err != nil {
 		return ErrInvalidEmailFormat
 	}
+	
 
 	u.Email = newEmail
 	return nil
@@ -92,7 +95,20 @@ func (u *User) ChangeName(currentName, newName string) error {
 	return nil
 }
 
-func isValidEmail(email string) bool {
-	_, err := mail.ParseAddress(email)
-	return err == nil
+func isValidEmail(email string) error {
+	addr, err := mail.ParseAddress(email)
+	if err != nil {
+		return err
+	}
+
+	parts := strings.Split(addr.Address, "@")
+	if len(parts) != 2 {
+		return err
+	}
+
+	if !strings.EqualFold(parts[1], "example.com") {
+		return err
+	}
+
+	return nil
 }
