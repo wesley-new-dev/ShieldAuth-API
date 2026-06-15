@@ -1,4 +1,4 @@
-package service
+package auth
 
 import (
 	"context"
@@ -6,6 +6,7 @@ import (
 	"ShieldAuth-API/internal/domain"
 	"ShieldAuth-API/internal/security/redis"
 )
+
 
 type ValidTokenService struct {
 	resetStore redis.PasswordResetStore
