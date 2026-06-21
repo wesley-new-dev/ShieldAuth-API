@@ -1,10 +1,10 @@
 package repository
 
 import (
-	"errors"
 	"context"
-	"fmt"
 	"database/sql"
+	"errors"
+	"fmt"
 
 	"ShieldAuth-API/internal/domain"
 
@@ -32,9 +32,6 @@ type ResetPasswordStruct struct {
 	Database *sql.DB
 	redis *redis.Client
 }
-type ValidTokenStruct struct {
-	Database *sql.DB
-}
 type DeleteAccountStruct struct {
 	Database *sql.DB
 }
@@ -42,6 +39,9 @@ type SessionAndAudit struct {
 	Database *sql.DB
 }
 type ChangePasswordStruct struct {
+	Database *sql.DB
+}
+type LogOutStruct struct {
 	Database *sql.DB
 }
 
@@ -81,27 +81,52 @@ func NewDeleteAccountStruct(database *sql.DB) *DeleteAccountStruct {
 		Database: database,
 	}
 }
-func NewValidTokenStruct(database *sql.DB) *ValidTokenStruct {
-	return &ValidTokenStruct{
-		Database: database,
-	}
-}
 func NewChangePasswordStruct(database *sql.DB) *ChangePasswordStruct {
 	return &ChangePasswordStruct{
 		Database: database,
 	}
 }
+func NewLogOutStruct(database *sql.DB) *LogOutStruct {
+	return &LogOutStruct{
+		Database: database,
+	}
+}
 
 
-func (register *RegisterStruct) Create(ctx context.Context, u *domain.User) error {
-	_, err := register.Database.ExecContext(ctx, "INSERT INTO users (name, email, password_hash) VALUES (?, ?, ?)", u.Name, u.Email, u.PasswordHash)
+func (register *RegisterStruct) Create(ctx context.Context, u *domain.User) (int64, error) {
+	result, err := register.Database.ExecContext(ctx, "INSERT INTO users (name, email, password_hash) VALUES (?, ?, ?)", u.Name, u.Email, u.PasswordHash)
 	if err != nil {
 		if mySqlError, ok := errors.AsType[*mysql.MySQLError](err); ok {
 			if mySqlError.Number == 1062 {
-				return domain.ErrEmailAlreadyExists
+				return 0, domain.ErrEmailAlreadyExists
 			}
 		}
-		return fmt.Errorf("Repository error: failed to insert user: %w", err)
+		return 0, err
+	}
+
+	id, err := result.LastInsertId()
+	if err != nil {
+		return 0, err
+	}
+
+	return id, nil
+}
+
+
+func (r *RegisterStruct) SaveRefreshToken(ctx context.Context, model domain.RefreshToken) error {
+	query := `INSERT INTO refresh_tokens (user_id, token_hash, expires_at) VALUES (?, ?, ?)`
+	result, err := r.Database.ExecContext(ctx, query, model.UserID, model.Token, model.ExpiresAt)
+	if err != nil {
+		return err
+	}
+
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+
+	if affected != 1 {
+		return domain.ErrNotFound
 	}
 
 	return nil
@@ -110,7 +135,7 @@ func (register *RegisterStruct) Create(ctx context.Context, u *domain.User) erro
 
 func (r *MySQLUserRepository) GetByIdentifier(ctx context.Context, identifier string) (*domain.User, error) {
 	var dbUser struct {
-		ID 				int
+		ID 				int64
 		Name 			string
 		Email 			string
 		PasswordHash 	[]byte
@@ -129,20 +154,40 @@ func (r *MySQLUserRepository) GetByIdentifier(ctx context.Context, identifier st
 }
 
 
-func (r *MySQLUserRepository) Rehash(ctx context.Context, id int, hash []byte) error {
+func (r *MySQLUserRepository) Rehash(ctx context.Context, id int64, hash []byte) error {
 	query := "UPDATE users SET password_hash = ? WHERE id = ?"
 	result, err := r.Database.ExecContext(ctx, query, hash, id)
 	if err != nil {
-		return domain.ErrUserNotFound
+		return err
 	}
 
 	affected, err := result.RowsAffected()
 	if err != nil {
-		return domain.ErrInternal
+		return err
 	}
 
 	if affected != 1 {
+		return domain.ErrNotFound
+	}
+
+	return nil
+}
+
+
+func (r *MySQLUserRepository) SaveRefreshToken(ctx context.Context, model domain.RefreshToken) error {
+	query := `INSERT INTO refresh_tokens (user_id, token_hash, expires_at) VALUES (?, ?, ?)` // parece que salva o token em texto puro ao inves do hash por causa do 'model.Token'
+	result, err := r.Database.ExecContext(ctx, query, model.UserID, model.Token, model.ExpiresAt)
+	if err != nil {
 		return err
+	}
+
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+
+	if affected != 1 {
+		return domain.ErrNotFound
 	}
 
 	return nil
@@ -151,7 +196,7 @@ func (r *MySQLUserRepository) Rehash(ctx context.Context, id int, hash []byte) e
 
 func (r *ChangeNameStruct) GetForChangeName(ctx context.Context, id int) (*domain.User, error) {
 	var result struct {
-		ID 		int
+		ID 		int64
 		Name 	string
 	}
  
@@ -181,7 +226,7 @@ func (changeName *ChangeNameStruct) UpdateName(ctx context.Context, user *domain
 	}
 
 	if affected != 1 {
-		return err
+		return domain.ErrNotFound
 	}
 
 	return nil
@@ -190,7 +235,7 @@ func (changeName *ChangeNameStruct) UpdateName(ctx context.Context, user *domain
 
 func (changeEmail *ChangeEmailStruct) GetID(ctx context.Context, id int) (*domain.User, error) {
 	var test struct {
-		ID 				int
+		ID 				int64
 		Email 			string
 		PasswordHash 	[]byte
 	}
@@ -218,7 +263,7 @@ func (changeEmail *ChangeEmailStruct) UpdateEmail(ctx context.Context, user *dom
 	}
 
 	if affected != 1 {
-		return err
+		return domain.ErrNotFound
 	}
 
 	return err
@@ -253,16 +298,16 @@ func (deleteAccount *DeleteAccountStruct) Delete(ctx context.Context, id int) er
 	}
 
 	if affected != 1 {
-		return err
+		return domain.ErrNotFound
 	}
 
 	return nil
 }
 
 
-func (deleteAccount *DeleteAccountStruct) GetHashById(ctx context.Context, id int, passwordHash []byte) (*domain.User, error) {
+func (deleteAccount *DeleteAccountStruct) GetHashById(ctx context.Context, id int) (*domain.User, error) {
 	var result struct {
-		Id 				int
+		Id 				int64
 		passwordHash 	[]byte
 	}
 	query := "SELECT id, password_hash FROM users WHERE id = ?"
@@ -290,7 +335,7 @@ func (r *ResetPasswordStruct) UpdatePassword(ctx context.Context, userID string,
 	}
 
 	if affected != 1 {
-		return err
+		return domain.ErrNotFound
 	}
 
 	return nil
@@ -315,7 +360,7 @@ func (s *SessionAndAudit) CreateSession(ctx context.Context, userID int, refresh
 
 func (changePassword *ChangePasswordStruct) FindById(ctx context.Context, id int) (*domain.User, error) {
 	var result struct {
-		ID 				int
+		ID 				int64
 		PasswordHash 	[]byte
 	}
 
@@ -336,7 +381,7 @@ func (changePassword *ChangePasswordStruct) UpdatePasswordHash(ctx context.Conte
 	query := `UPDATE users SET password_hash = ? WHERE id = ?`
 	result, err := changePassword.Database.ExecContext(ctx, query, hash, id)
 	if err != nil {
-		return domain.ErrUserNotFound
+		return err
 	}
 
 	affected, err := result.RowsAffected()
@@ -344,9 +389,30 @@ func (changePassword *ChangePasswordStruct) UpdatePasswordHash(ctx context.Conte
 		return err
 	}
 
-	if affected == 1 {
+	if affected != 1 {
+		return domain.ErrNotFound
+	}
+
+	return nil
+}
+
+
+func (logout *LogOutStruct) Revoke(ctx context.Context, token_hash []byte) error {
+	query := `UPDATE refresh_tokens SET revoked_at = NOW() WHERE token_hash = ? AND revoked_at IS NULL`
+	result, err := logout.Database.ExecContext(ctx, query, token_hash)
+	if err != nil {
 		return err
 	}
+
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+
+	if affected != 1 {
+		return domain.ErrNotFound
+	}
+
 
 	return nil
 }
