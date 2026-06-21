@@ -3,6 +3,7 @@ package user
 import (
 	"bytes"
 	"context"
+	"errors"
 	"testing"
 
 	"ShieldAuth-API/internal/domain"
@@ -13,8 +14,8 @@ import (
 	"github.com/stretchr/testify/mock"
 )
 
-
 type MockDeleteAccountRepository struct{ mock.Mock }
+
 func (m *MockDeleteAccountRepository) Delete(ctx context.Context, id int) error {
 	args := m.Called(ctx, id)
 	return args.Error(0)
@@ -27,8 +28,8 @@ func (m *MockDeleteAccountRepository) GetHashById(ctx context.Context, id int) (
 	return args.Get(0).(*domain.User), args.Error(1)
 }
 
-
 type MockDeleteAccountHasher struct{ mock.Mock }
+
 func (m *MockDeleteAccountHasher) Compare(password []byte, passwordHash []byte) (*argon2.HashMetaData, error) {
 	args := m.Called(password, passwordHash)
 	if args.Get(0) == nil {
@@ -37,24 +38,36 @@ func (m *MockDeleteAccountHasher) Compare(password []byte, passwordHash []byte) 
 	return args.Get(0).(*argon2.HashMetaData), args.Error(1)
 }
 
+func (m *MockDeleteAccountHasher) Hash(password []byte) ([]byte, error) {
+	args := m.Called(password)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]byte), args.Error(1)
+}
+
+func (m *MockDeleteAccountHasher) NeedsRehash(memory uint32, iterations uint32, parallelism uint8) bool {
+	args := m.Called(memory, iterations, parallelism)
+	return args.Bool(0)
+}
 
 func TestDeleteAccount(t *testing.T) {
 
 	tests := []struct {
-		name 			string
-		input 			service.DeleteAccountInput
-		setupMocks 		func(mRepo *MockDeleteAccountRepository, mHasher *MockDeleteAccountHasher)
-		expectedError 	error
+		name          string
+		input         service.DeleteAccountInput
+		setupMocks    func(mRepo *MockDeleteAccountRepository, mHasher *MockDeleteAccountHasher)
+		expectedError error
 	}{
 		{
 
 			name: "success: the account was deleted",
 			input: service.DeleteAccountInput{
-				UserID: 			123,
-				CurrentPassword: 	[]byte("test_current_password"),
+				UserID:          123,
+				CurrentPassword: []byte("test_current_password"),
 			},
 			setupMocks: func(mRepo *MockDeleteAccountRepository, mHasher *MockDeleteAccountHasher) {
-				
+
 				fakeUser := domain.RestoreUser(123, "", "", []byte("test_current_password"))
 				mRepo.On("GetHashById", mock.Anything, 123).Return(fakeUser, nil)
 
@@ -64,75 +77,86 @@ func TestDeleteAccount(t *testing.T) {
 				mRepo.On("Delete", mock.Anything, 123).Return(nil)
 			},
 			expectedError: nil,
-
 		},
 		{
 
 			name: "Error: password is nil",
 			input: service.DeleteAccountInput{
-				UserID: 			123,
-				CurrentPassword: 	[]byte(""),
+				UserID:          123,
+				CurrentPassword: []byte(""),
 			},
-			setupMocks: func(mRepo *MockDeleteAccountRepository, mHasher *MockDeleteAccountHasher) {},
+			setupMocks:    func(mRepo *MockDeleteAccountRepository, mHasher *MockDeleteAccountHasher) {},
 			expectedError: domain.ErrInvalidData,
-
 		},
 		{
 
 			name: "Error: password is too short",
 			input: service.DeleteAccountInput{
-				UserID: 			123,
-				CurrentPassword: 	[]byte("short"),
+				UserID:          123,
+				CurrentPassword: []byte("short"),
 			},
-			setupMocks: func(mRepo *MockDeleteAccountRepository, mHasher *MockDeleteAccountHasher) {},
+			setupMocks:    func(mRepo *MockDeleteAccountRepository, mHasher *MockDeleteAccountHasher) {},
 			expectedError: domain.ErrInvalidData,
 		},
 		{
 
 			name: "Error: passwod is too long",
 			input: service.DeleteAccountInput{
-				UserID: 			123,
-				CurrentPassword: 	bytes.Repeat([]byte("a"), 257),
+				UserID:          123,
+				CurrentPassword: bytes.Repeat([]byte("a"), 257),
 			},
-			setupMocks: func(mRepo *MockDeleteAccountRepository, mHasher *MockDeleteAccountHasher) {},
+			setupMocks:    func(mRepo *MockDeleteAccountRepository, mHasher *MockDeleteAccountHasher) {},
 			expectedError: domain.ErrInvalidData,
-
 		},
 		{
 
 			name: "Error: user was not found",
 			input: service.DeleteAccountInput{
-				UserID: 			123,
-				CurrentPassword: 	[]byte("test_current_password"),
+				UserID:          123,
+				CurrentPassword: []byte("test_current_password"),
 			},
 			setupMocks: func(mRepo *MockDeleteAccountRepository, mHasher *MockDeleteAccountHasher) {
 				mRepo.On("GetHashById", mock.Anything, 123).Return(nil, domain.ErrUserNotFound)
 			},
 			expectedError: domain.ErrUserNotFound,
-
 		},
 		{
 
 			name: "Error: wrong password",
+			input: service.DeleteAccountInput{
+				UserID:          123,
+				CurrentPassword: []byte("test_wrong_password"),
+			},
 			setupMocks: func(mRepo *MockDeleteAccountRepository, mHasher *MockDeleteAccountHasher) {
-				
+
 				fakeUser := domain.RestoreUser(123, "", "", []byte("test_current_password"))
 				mRepo.On("GetHashById", mock.Anything, 123).Return(fakeUser, nil)
 
-				mHasher.On("Compare", []byte("test_current_password"), fakeUser.PasswordHash).Return(nil, domain.ErrInvalidPassword)
+				mHasher.On("Compare", []byte("test_wrong_password"), fakeUser.PasswordHash).Return(nil, domain.ErrInvalidPassword)
 			},
 			expectedError: domain.ErrInvalidPassword,
-
 		},
 		{
-			
-			name: "Error: database failure on delete",
+
+			name: "Error: database internal failure on fetch",
 			input: service.DeleteAccountInput{
-				UserID: 			123,
-				CurrentPassword: 	[]byte("test_current_password"),
+				UserID:          123,
+				CurrentPassword: []byte("test_current_password"),
 			},
 			setupMocks: func(mRepo *MockDeleteAccountRepository, mHasher *MockDeleteAccountHasher) {
-				
+				mRepo.On("GetHashById", mock.Anything, 123).Return(nil, errors.New("databse internal failure on fetch"))
+			},
+			expectedError: domain.ErrUserNotFound,
+		},
+		{
+
+			name: "Error: database failure on delete",
+			input: service.DeleteAccountInput{
+				UserID:          123,
+				CurrentPassword: []byte("test_current_password"),
+			},
+			setupMocks: func(mRepo *MockDeleteAccountRepository, mHasher *MockDeleteAccountHasher) {
+
 				fakeUser := domain.RestoreUser(123, "", "", []byte("test_current_password"))
 				mRepo.On("GetHashById", mock.Anything, 123).Return(fakeUser, nil)
 
@@ -142,7 +166,6 @@ func TestDeleteAccount(t *testing.T) {
 				mRepo.On("Delete", mock.Anything, 123).Return(domain.ErrInternal)
 			},
 			expectedError: domain.ErrInternal,
-
 		},
 	}
 
@@ -164,7 +187,7 @@ func TestDeleteAccount(t *testing.T) {
 
 			mockRepo.AssertExpectations(t)
 			mockHasher.AssertExpectations(t)
-			
+
 		})
 	}
 
