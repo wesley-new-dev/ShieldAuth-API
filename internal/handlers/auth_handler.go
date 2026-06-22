@@ -7,12 +7,15 @@ import (
 	"net/url"
 	"text/template"
 	"time"
+	"errors"
 
 	"ShieldAuth-API/internal/domain"
 	"ShieldAuth-API/internal/request"
 	"ShieldAuth-API/internal/response"
 	"ShieldAuth-API/internal/security"
 	"ShieldAuth-API/internal/service"
+	"ShieldAuth-API/internal/service/auth"
+	"ShieldAuth-API/internal/service/user"
 	"ShieldAuth-API/internal/ui"
 )
 
@@ -28,22 +31,25 @@ type RateLimiter interface {
 
 
 type RegisterHandler struct {
-	Service *service.RegisterService
+	Service *auth.RegisterService
 }
 type LoginHandler struct {
 	Service LoginServiceInterface
 	Limiter RateLimiter
 }
 type RequestHandler struct {
-	Service *service.RequestResetService
+	Service *user.RequestResetService
 	Limiter RateLimiter
 }
 type ValidTokenHandler struct {
-	Service *service.ValidTokenService
+	Service *auth.ValidTokenService
+}
+type LogOutHandler struct {
+	Service *auth.LogOutService
 }
 
 
-func NewRegisterHanlder(service *service.RegisterService) *RegisterHandler {
+func NewRegisterHanlder(service *auth.RegisterService) *RegisterHandler {
 	return &RegisterHandler{
 		Service: service,
 	}
@@ -54,14 +60,19 @@ func NewLoginHandler(service LoginServiceInterface, limiter RateLimiter) *LoginH
 		Limiter: limiter,
 	}
 }
-func NewRequestHandler(s *service.RequestResetService, limiter RateLimiter) *RequestHandler {
+func NewRequestHandler(s *user.RequestResetService, limiter RateLimiter) *RequestHandler {
 	return &RequestHandler{
 		Service: s,
 		Limiter: limiter,
 	}
 }
-func NewValidTokenHandler(s *service.ValidTokenService) *ValidTokenHandler {
+func NewValidTokenHandler(s *auth.ValidTokenService) *ValidTokenHandler {
 	return &ValidTokenHandler{
+		Service: s,
+	}
+}
+func NewLogOutHandler(s *auth.LogOutService) *LogOutHandler {
+	return &LogOutHandler{
 		Service: s,
 	}
 }
@@ -129,7 +140,7 @@ func (handler *RegisterHandler) RegisterHandler(w http.ResponseWriter, r *http.R
 		MaxAge: validDays * 24 * 60 * 60,
 		HttpOnly: true,
 		Secure: true,
-		SameSite: http.SameSiteStrictMode,
+		SameSite: http.SameSiteNoneMode,
 		Path: "/",
 	}
 
@@ -199,7 +210,7 @@ func (h *LoginHandler) HandlerLogin(w http.ResponseWriter, r *http.Request) {
 		MaxAge: validDays * 24 * 60 * 60,
 		HttpOnly: true,
 		Secure: true,
-		SameSite: http.SameSiteStrictMode,
+		SameSite: http.SameSiteLaxMode,
 		Path: "/",
 	}
 
@@ -280,4 +291,41 @@ func (h *ValidTokenHandler) ValidToken(w http.ResponseWriter, r *http.Request) {
 	}
 
 	tmpl.Execute(w, data)
+}
+
+
+func (l *LogOutHandler) LogOutHandler(w http.ResponseWriter, r *http.Request ) {
+
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	cookie, err := r.Cookie("refresh_token")
+	if err != nil {
+		if errors.Is(err, http.ErrNoCookie) {
+			response.Error(w, http.StatusUnauthorized, "cookie was not found", err)
+			return
+		}
+		response.Error(w, http.StatusUnauthorized, "Unathorized", err)
+		return
+	}
+
+	err = l.Service.LogOutFunction(r.Context(), service.LogOutInput{RefreshToken: []byte(cookie.Value)},)
+	if err != nil {
+		MapServiceError(w, err)
+		return
+	}
+
+	http.SetCookie(w, &http.Cookie{
+		Name: "refresh_token",
+		Value: "",
+		MaxAge: -1,
+		HttpOnly: true,
+		Secure: true,
+		Path: "/",
+	})
+
+
+	response.Json(w, http.StatusNoContent, map[string]string{"message": "success"})
 }
