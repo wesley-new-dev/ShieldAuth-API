@@ -8,46 +8,48 @@ DOCKER_COMPOSE=docker compose
 
 .PHONY: help up down build restart test logs tidy fmt lint security check
 
-help:
+help: ## Show this help menu
 	@echo "Usage: make [command]"
 	@echo ""
 	@echo "Commands:"
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-15s\033[0m %s\n", $$1, $$2}''
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-15s\033[0m %s\n", $$1, $$2}'
 
-up:
+up: ## Start docker containers in the background
 	$(DOCKER_COMPOSE) up -d
 
-down:
+down: ## Stop and remove docker containers
 	$(DOCKER_COMPOSE) down
 
-build:
+build: ## Rebuild images and start docker containers
 	$(DOCKER_COMPOSE) up -d --build
 
-restart: down up
+restart: ## Restart docker containers (down + up)
+	$(DOCKER_COMPOSE) down
+	$(DOCKER_COMPOSE) up -d
 
-test:
+test: ## Run unit tests with data race detection
 	go test -v -race ./...
 
-logs:
+logs: ## View and follow docker container logs
 	$(DOCKER_COMPOSE) logs -f
 
-tidy:
+tidy: ## Clean up and verify go.mod dependencies
 	go mod tidy
 	go mod verify
 
-fmt:
-	go fmt./...
+fmt: ## Format Go code according to official standards
+	go fmt ./...
 
-lint:
+lint: ## Run advanced static analysis using golangci-lint (includes go vet)
 	golangci-lint run
 
-security:
+security: ## Check for known vulnerabilities in code and dependencies
 	go install golang.org/x/exp/cmd/govulncheck@latest
 	govulncheck ./...
 
-check: fmt tidy security test
+check: fmt tidy security test ## Run all verification checks before pushing code
 	@echo "Pre-push checks passed!"
 
-setup: 
-	@if [ ! -f .env ]; then cp .env.example && echo ".env file created"; fi
+setup: ## Create local .env file and download dependencies
+	@if [ ! -f .env ]; then cp .env.example .env && echo ".env file created"; fi
 	go mod download
