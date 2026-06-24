@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"time"
 
@@ -14,20 +15,17 @@ import (
 
 var dummyArgon2Hash = []byte("DPunA5HgdFJkHrryZptqsQLwmAB4NfaRoM/TiI3Elg01fD2iGX7DuMlQ6B6KATx")
 
-
 type LoginService struct {
-	repo 	LoginRepository
-	hasher 	argon2.Argon2Hasher
+	repo   LoginRepository
+	hasher argon2.Hasher
 }
 
-
-func NewLoginService(repo LoginRepository, hasher argon2.Argon2Hasher) *LoginService {
+func NewLoginService(repo LoginRepository, hasher argon2.Hasher) *LoginService {
 	return &LoginService{
-		repo: repo,
+		repo:   repo,
 		hasher: hasher,
 	}
 }
-
 
 func (s *LoginService) VerifyLoginFunction(ctx context.Context, input service.LoginInput) (int64, error) {
 
@@ -74,7 +72,7 @@ func (s *LoginService) VerifyLoginFunction(ctx context.Context, input service.Lo
 	return user.Id, nil
 }
 
-func (s *LoginService) CreateRefreshToken(ctx context.Context, userID int64, duration time.Duration) (string, error)  {
+func (s *LoginService) CreateRefreshToken(ctx context.Context, userID int64, duration time.Duration) (string, error) {
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
 		return "", err
@@ -82,9 +80,11 @@ func (s *LoginService) CreateRefreshToken(ctx context.Context, userID int64, dur
 	tokenString := hex.EncodeToString(b)
 	expiresAt := time.Now().Add(duration)
 
+	hash := sha256.Sum256([]byte(tokenString))
+
 	tokenModel := domain.RefreshToken{
 		UserID:    userID,
-		Token:     tokenString,
+		Token:     hash[:],
 		ExpiresAt: expiresAt,
 	}
 

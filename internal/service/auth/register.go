@@ -3,42 +3,56 @@ package auth
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"time"
 
 	"ShieldAuth-API/internal/domain"
 	"ShieldAuth-API/internal/security"
-	"ShieldAuth-API/internal/security/argon2"
-	"ShieldAuth-API/internal/security/hibp"
 	"ShieldAuth-API/internal/service"
 )
 
+type registerHasher interface {
+	Hash(password []byte) ([]byte, error)
+}
+
+type registerHIBPChecker interface {
+	IsLeaked(password []byte) (bool, error)
+}
+
 type RegisterService struct {
 	repo     RegisterRepository
-	hasher   argon2.Argon2Hasher
-	hibp     hibp.HIBPChecker
+	hasher   registerHasher
+	hibp     registerHIBPChecker
 	security security.PasswordLeakChecker
 }
 
-
-func NewRegisterService(repo RegisterRepository, hibp hibp.HIBPChecker, hasher argon2.Argon2Hasher) *RegisterService {
+func NewRegisterService(repo RegisterRepository, hibp registerHIBPChecker, hasher registerHasher) *RegisterService {
 	return &RegisterService{
 		repo:     repo,
 		hibp:     hibp,
-		security: &hibp,
+		security: hibp,
 		hasher:   hasher,
 	}
 }
-
 
 func (register *RegisterService) RegisterFunction(ctx context.Context, input service.RegisterInput) (int64, error) {
 
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 
-	if err := security.VerifyPassword(register.security, input.Password); err != nil {
-		return 0, domain.ErrWeakPassword
+	err := security.VerifyPassword(register.security, input.Password)
+	if err != nil {
+		if errors.Is(err, domain.ErrPasswordPwned) {
+			return 0, domain.ErrPasswordPwned
+		}
+		if errors.Is(err, domain.ErrShortPassword) || errors.Is(err, domain.ErrLongPassword) {
+			return 0, domain.ErrWeakPassword
+		}
+
+		return 0, domain.ErrInternal
 	}
 
 	hash, err := register.hasher.Hash(input.Password)
@@ -62,7 +76,7 @@ func (register *RegisterService) RegisterFunction(ctx context.Context, input ser
 	return id, nil
 }
 
-func (register *RegisterService) CreateRefreshToken(ctx context.Context, userID int64, duration time.Duration) (string, error)  {
+func (register *RegisterService) CreateRefreshToken(ctx context.Context, userID int64, duration time.Duration) (string, error) {
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
 		return "", err
@@ -70,9 +84,11 @@ func (register *RegisterService) CreateRefreshToken(ctx context.Context, userID 
 	tokenString := hex.EncodeToString(b)
 	expiresAt := time.Now().Add(duration)
 
+	hash := sha256.Sum256([]byte(tokenString))
+
 	tokenModel := domain.RefreshToken{
 		UserID:    userID,
-		Token:     tokenString,
+		Token:     hash[:],
 		ExpiresAt: expiresAt,
 	}
 
