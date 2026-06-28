@@ -1,0 +1,1 @@
+ALTER TABLE users ADD COLUMN jwt_version INT NOT NULL DEFAULT 1;
