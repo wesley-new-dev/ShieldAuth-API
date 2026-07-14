@@ -1,7 +1,8 @@
 package middleware
 
 import (
-	"log"
+	"fmt"
+	"log/slog"
 	"net/http"
 	"runtime/debug"
 	"time"
@@ -9,15 +10,28 @@ import (
 
 func Recovery(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		traceID, _ := r.Context().Value(TraceIDKey).(string)
+
 		defer func() {
 			if err := recover(); err != nil {
-				log.Printf("PANIC [%s %s]: %v\n%s", r.Method, r.URL.Path, err, debug.Stack())
-				http.Error(w, "Server error", http.StatusInternalServerError)
+				stack := string(debug.Stack())
+				slog.ErrorContext(r.Context(), "PANIC RECOVERED",
+					"trace_id", traceID,
+					"method", r.Method,
+					"path", r.URL.Path,
+					"error", fmt.Sprintf("%v", err),
+					"stack", stack,
+				)
 			}
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		}()
 
-		start := time.Now()
 		next.ServeHTTP(w, r)
-		log.Printf("[%s] %s | Duration: %v", r.Method, r.URL.Path, time.Since(start))
+		slog.InfoContext(r.Context(), "Request processed",
+			"trace_id", traceID,
+			"method", r.Method,
+			"path", r.URL.Path,
+			"duration", time.Since(start).String())
 	})
 }
