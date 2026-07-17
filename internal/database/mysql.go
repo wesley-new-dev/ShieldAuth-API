@@ -3,7 +3,7 @@ package database
 import (
 	"database/sql"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"time"
 
@@ -14,11 +14,11 @@ import (
 	"github.com/joho/godotenv"
 )
 
-
 func Connect() *sql.DB {
 	err := godotenv.Load()
 	if err != nil {
-		log.Fatal("ERROR: ", err)
+		slog.Error("failed to load environment variables", "error", err)
+		os.Exit(1)
 	}
 
 	databaseUser := os.Getenv("DATABASE_USER")
@@ -36,8 +36,6 @@ func Connect() *sql.DB {
 		if err == nil {
 			err = database.Ping()
 			if err == nil {
-				log.Println("SUCCESS")
-
 				database.SetMaxOpenConns(10)
 				database.SetMaxIdleConns(5)
 				database.SetConnMaxLifetime(5 * time.Minute)
@@ -45,19 +43,20 @@ func Connect() *sql.DB {
 			}
 		}
 
-		log.Printf("WAITING... ATTEMPT: %d/10", i+1)
+		slog.Info("waiting for database connection", "attempt", i+1, "max_attempts", 10)
 		time.Sleep(3 * time.Second)
 	}
 
-	log.Fatal("ERROR: ", err)
+	slog.Error("failed to connect to database", "error", err)
+	os.Exit(1)
 	return nil
 }
-
 
 func RunMigrations(db *sql.DB) {
 	driver, err := mysql.WithInstance(db, &mysql.Config{})
 	if err != nil {
-		log.Fatal("ERROR (driver): ", err)
+		slog.Error("failed to create migration driver", "error", err)
+		os.Exit(1)
 	}
 
 	m, err := migrate.NewWithDatabaseInstance(
@@ -66,26 +65,29 @@ func RunMigrations(db *sql.DB) {
 		driver,
 	)
 	if err != nil {
-		log.Fatal("ERROR (migrate instance): ", err)
+		slog.Error("failed to create migrate instance", "error", err)
+		os.Exit(1)
 	}
 
 	versionBefore, dirty, err := m.Version()
 	if err != nil && err != migrate.ErrNilVersion {
-		log.Fatal(err)
+		slog.Error("failed to read migration version", "error", err)
+		os.Exit(1)
 	}
 	if dirty {
-		log.Printf("dirty migration state detected at version: %d; forcing recover", versionBefore)
+		slog.Info("dirty migration state detected", "version", versionBefore)
 	}
 
 	err = m.Up()
 	if err != nil {
 		if err == migrate.ErrNoChange {
-			log.Printf("no new migrations to run. Current version: %d", versionBefore)
+			slog.Info("no new migrations to run", "current_version", versionBefore)
 			return
 		}
-		log.Fatal("ERROR (running up): ", err)
+		slog.Error("failed to apply migrations", "error", err)
+		os.Exit(1)
 	}
 
 	versionAfter, _, _ := m.Version()
-	log.Printf("SUCCESS: migration applied from version %d to %d", versionBefore, versionAfter)
+	slog.Info("migration applied", "from_version", versionBefore, "to_version", versionAfter)
 }
