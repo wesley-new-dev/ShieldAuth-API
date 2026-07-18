@@ -2,9 +2,11 @@ package argon2
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"
 	"fmt"
+	"os"
 	"strings"
 
 	"ShieldAuth-API/internal/domain"
@@ -14,39 +16,63 @@ import (
 )
 
 type Argon2Hasher struct {
-	memory 			uint32
-	iterations 		uint32
-	parallelism 	uint8
-	keyLength 		uint32
-	saltLength		uint32
+	memory      uint32
+	iterations  uint32
+	parallelism uint8
+	keyLength   uint32
+	saltLength  uint32
 }
-type HashMetaData struct {
-	Version 		int
-	Memory 			uint32
-	Iterations 		uint32
-	Parallelism 	uint8
+type Hasher interface {
+	Hash(password []byte) ([]byte, error)
+	Compare(password, passwordHash []byte) (*HashMetaData, error)
+	NeedsRehash(memory uint32, iterations uint32, parallelism uint8) bool
 }
 
+type HashMetaData struct {
+	Version     int
+	Memory      uint32
+	Iterations  uint32
+	Parallelism uint8
+}
 
 func NewArgon2Hasher() *Argon2Hasher {
 	return &Argon2Hasher{
-		memory: 		64 * 1024,
-		iterations: 	3,
-		parallelism: 	4,
-		keyLength: 		32,
-		saltLength: 	16,
+		memory:      64 * 1024,
+		iterations:  3,
+		parallelism: 4,
+		keyLength:   32,
+		saltLength:  16,
 	}
 }
 
+func getPepperedPassword(password []byte) []byte {
+	pepper := os.Getenv("GLOBAL_PEPPER")
+	if pepper == "" {
+		return password
+	}
+
+	peppered := append(password, []byte(pepper)...)
+	defer security.ZeroMemory(peppered)
+
+	hash := sha256.Sum256(peppered)
+
+	result := make([]byte, len(hash))
+	copy(result, hash[:])
+
+	return hash[:]
+}
 
 func (h *Argon2Hasher) Hash(password []byte) ([]byte, error) {
+	pepperedPassword := getPepperedPassword(password)
+	defer security.ZeroMemory(pepperedPassword)
+
 	salt := make([]byte, h.saltLength)
 	if _, err := rand.Read(salt); err != nil {
 		return nil, err
 	}
 	defer security.ZeroMemory(salt)
 
-	hash := argon2.IDKey(password, salt, h.iterations, h.memory, h.parallelism, h.keyLength)
+	hash := argon2.IDKey(pepperedPassword, salt, h.iterations, h.memory, h.parallelism, h.keyLength)
 	defer security.ZeroMemory(hash)
 
 	saltB64 := base64.RawStdEncoding.EncodeToString(salt)
@@ -57,19 +83,19 @@ func (h *Argon2Hasher) Hash(password []byte) ([]byte, error) {
 	return []byte(encoded), nil
 }
 
-
 func (h *Argon2Hasher) Compare(password []byte, passwordHash []byte) (*HashMetaData, error) {
+	pepperedPassword := getPepperedPassword(password)
 
 	const (
-		maxMemory 		= 1024 * 1024
-		maxIterations 	= 20
-		maxParallelism 	= 16
+		maxMemory      = 1024 * 1024
+		maxIterations  = 20
+		maxParallelism = 16
 	)
 
 	const (
-		minMemory 		= 8 * 1024
-		minIterations 	= 2
-		minParallelism 	= 1
+		minMemory      = 8 * 1024
+		minIterations  = 2
+		minParallelism = 1
 	)
 
 	parts := strings.Split(string(passwordHash), "$")
@@ -92,8 +118,8 @@ func (h *Argon2Hasher) Compare(password []byte, passwordHash []byte) (*HashMetaD
 		return nil, domain.ErrInvalidCredentials
 	}
 
-	var memory 		uint32
-	var iterations 	uint32
+	var memory uint32
+	var iterations uint32
 	var parallelism uint8
 
 	_, err = fmt.Sscanf(parts[3], "m=%d,t=%d,p=%d", &memory, &iterations, &parallelism)
@@ -123,7 +149,7 @@ func (h *Argon2Hasher) Compare(password []byte, passwordHash []byte) (*HashMetaD
 		return nil, domain.ErrInvalidCredentials
 	}
 
-	newHash := argon2.IDKey(password,salt,iterations,memory,parallelism,uint32(len(storedHash)))
+	newHash := argon2.IDKey(pepperedPassword, salt, iterations, memory, parallelism, uint32(len(storedHash)))
 
 	if subtle.ConstantTimeCompare(storedHash, newHash) != 1 {
 		return nil, domain.ErrInvalidCredentials
@@ -131,7 +157,6 @@ func (h *Argon2Hasher) Compare(password []byte, passwordHash []byte) (*HashMetaD
 
 	return &HashMetaData{Version: version, Memory: memory, Iterations: iterations, Parallelism: parallelism}, nil
 }
-
 
 func (h *Argon2Hasher) NeedsRehash(memory uint32, iterations uint32, parallelism uint8) bool {
 	return memory != h.memory || iterations != h.iterations || parallelism != h.parallelism
