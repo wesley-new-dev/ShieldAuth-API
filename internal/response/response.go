@@ -2,8 +2,8 @@ package response
 
 import (
 	"encoding/json"
+	"log/slog"
 	"net/http"
-	"log"
 )
 
 func Json(w http.ResponseWriter, status int, data interface{}) {
@@ -14,9 +14,14 @@ func Json(w http.ResponseWriter, status int, data interface{}) {
 	}
 }
 
-func Error(w http.ResponseWriter, status int, message string, err error) {
-	if status >= 500 {
-		log.Printf("[ERROR] Status: %d | Message: %s | Internal Error: %v", status, message, err)
+func Error(w http.ResponseWriter, status int, message string, code string, err error) {
+	if status >= 500 && err != nil {
+		slog.Error("HTTP request failed",
+			"status", status,
+			"user_message", message,
+			"code", code,
+			"internal_error", err.Error(),
+		)
 	}
-	Json(w, status, map[string]string{"error": message})
+	Json(w, status, map[string]string{"error": message, "code": code})
 }
