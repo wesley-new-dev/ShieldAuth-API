@@ -1,17 +1,23 @@
 package domain
 
 import (
+	"context"
 	"net/mail"
 	"strings"
 )
 
 type User struct {
-	Id 				int64
-	Name 			string
-	Email 			string
-	PasswordHash 	[]byte
+	Id           int64  `json:"id"`
+	Name         string `json:"name"`
+	Email        string `json:"email"`
+	JWTVersion   int    `json:"jwt_version"`
+	PasswordHash []byte `json:"-"`
 }
 
+type UserRepository interface {
+	GetByID(ctx context.Context, id int64) (*User, error)
+	Update(ctx context.Context, user *User) error
+}
 
 func NewUser(name, email string, passwordHash []byte) (*User, error) {
 	cleanName := strings.TrimSpace(name)
@@ -27,22 +33,24 @@ func NewUser(name, email string, passwordHash []byte) (*User, error) {
 	}
 
 	return &User{
-		Name: cleanName,
-		Email: cleanEmail,
+		Name:         cleanName,
+		Email:        cleanEmail,
 		PasswordHash: passwordHash,
 	}, nil
 }
 
 func RestoreUser(
-	id 				int64,
-	name 			string,
-	email 			string,
-	passwordHash 	[]byte,
+	id int64,
+	name string,
+	email string,
+	jwtVersion int,
+	passwordHash []byte,
 ) *User {
 	return &User{
-		Id: id,
-		Name: name,
-		Email: email,
+		Id:           id,
+		Name:         name,
+		Email:        email,
+		JWTVersion:   jwtVersion,
 		PasswordHash: passwordHash,
 	}
 }
@@ -68,12 +76,10 @@ func (u *User) ChangeEmail(currentEmail, newEmail, confirmNewEmail string) error
 	if err != nil {
 		return ErrInvalidEmailFormat
 	}
-	
 
 	u.Email = newEmail
 	return nil
 }
-
 
 func (u *User) ChangeName(currentName, newName string) error {
 	currentName = strings.TrimSpace(currentName)
