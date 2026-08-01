@@ -23,15 +23,16 @@ func Recovery(next http.Handler) http.Handler {
 					"error", fmt.Sprintf("%v", err),
 					"stack", stack,
 				)
+				http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 			}
-			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		}()
 
-		next.ServeHTTP(w, r)
 		slog.InfoContext(r.Context(), "Request processed",
 			"trace_id", traceID,
 			"method", r.Method,
 			"path", r.URL.Path,
 			"duration", time.Since(start).String())
+
+		next.ServeHTTP(w, r)
 	})
 }
