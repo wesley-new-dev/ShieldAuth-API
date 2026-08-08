@@ -1,5 +1,5 @@
 CREATE TABLE IF NOT EXISTS user_sessions (
-    id VARCHAR(255) PRIMARY KEY,
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
     user_id INT NOT NULL,
     user_agent TEXT NOT NULL,
     device_type VARCHAR(50) NOT NULL,
