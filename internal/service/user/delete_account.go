@@ -4,42 +4,57 @@ import (
 	"context"
 
 	"ShieldAuth-API/internal/domain"
-	"ShieldAuth-API/internal/repository"
 	"ShieldAuth-API/internal/security/argon2"
 	"ShieldAuth-API/internal/service"
 )
 
-type DeleteAccountService struct {
-	repo *repository.DeleteAccountStruct
-	hasher argon2.Argon2Hasher
+type DeleteAccountRepo interface {
+	GetHashById(ctx context.Context, id int) (*domain.User, error)
+	Delete(ctx context.Context, id int) error
 }
 
+type DeleteAccountService struct {
+	repo   DeleteAccountRepo
+	hasher argon2.Hasher
+}
 
-func NewDeleteAccountService(repo *repository.DeleteAccountStruct, hasher argon2.Argon2Hasher) *DeleteAccountService {
+func NewDeleteAccountService(repo DeleteAccountRepo, hasher argon2.Hasher) *DeleteAccountService {
 	return &DeleteAccountService{
-		repo: repo,
+		repo:   repo,
 		hasher: hasher,
 	}
 }
 
-
 func (delete *DeleteAccountService) DeleteAccountFunction(ctx context.Context, input service.DeleteAccountInput) error {
 
-	if len(input.CurrentPassword) == 0 {
-		return domain.ErrInvalidData
-	}
-
-	if len(input.CurrentPassword) > 256 {
-		return domain.ErrInvalidData
-	}
-
-	user, err := delete.repo.GetHashById(ctx, input.UserID, input.CurrentPassword)
+	user, err := delete.repo.GetHashById(ctx, input.UserID)
 	if err != nil {
 		return domain.ErrUserNotFound
 	}
 
-	if _, err := delete.hasher.Compare(input.CurrentPassword, user.PasswordHash); err != nil {
-		return domain.ErrInvalidPassword
+	var compareError error
+	err = input.CurrentPassword.ExecuteWithDecrypted(func(currentPasswordBytes []byte) error {
+
+		if len(currentPasswordBytes) < 8 || len(currentPasswordBytes) > 256 {
+			compareError = domain.ErrInvalidData
+			return nil
+		}
+
+		if _, err := delete.hasher.Compare(currentPasswordBytes, user.PasswordHash); err != nil {
+			compareError = domain.ErrInvalidPassword
+			return nil
+		}
+		// defer security.ZeroMemory(currentPasswordBytes)
+
+		return nil
+	})
+
+	if err != nil {
+		return err
+	}
+
+	if compareError != nil {
+		return compareError
 	}
 
 	if err := delete.repo.Delete(ctx, input.UserID); err != nil {
