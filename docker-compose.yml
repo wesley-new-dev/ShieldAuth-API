@@ -4,12 +4,12 @@ services:
     container_name: shieldauth-db
     restart: always
     environment:
-      MYSQL_DATABASE: shieldauth_db
+      MYSQL_DATABASE: ${DATABASE_NAME}
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
-      MYSQL_USER: ${DB_USER}
-      MYSQL_PASSWORD: ${DB_PASSWORD}
-    expose:
-      - "3306"
+      MYSQL_USER: ${DATABASE_USER}
+      MYSQL_PASSWORD: ${DATABASE_PASSWORD}
+    ports:
+      - "3306:3306"
     volumes:
       - db_data:/var/lib/mysql
     healthcheck:
@@ -24,11 +24,11 @@ services:
     image: redis:7-alpine
     container_name: shieldauth-redis
     restart: always
-    expose:
-      - "6379"
+    ports:
+      - "6379:6379"
     networks:
       - shieldauth-net
-  
+
   api:
     build:
       context: .
@@ -38,10 +38,16 @@ services:
     env_file:
       - .env
     environment:
-      - DB_HOST=db
-      - REDIS_HOST=redis
+      DATABASE_HOST: db
+      DATABASE_PORT: 3306
+      DATABASE_NAME: ${DATABASE_NAME}
+      DATABASE_USER: ${DATABASE_USER}
+      DATABASE_PASSWORD: ${DATABASE_PASSWORD}
+      REDIS_ADDR: redis:6379
+      JWT_KEY: ${JWT_KEY}
+      GLOBAL_PEPPER: ${GLOBAL_PEPPER}
     ports:
-      - "8080:8080"
+      - "8000:8000"
     depends_on:
       db:
         condition: service_healthy
