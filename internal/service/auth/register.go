@@ -12,68 +12,68 @@ import (
 	"ShieldAuth-API/internal/domain"
 	"ShieldAuth-API/internal/security"
 	"ShieldAuth-API/internal/service"
+
+	"github.com/google/uuid"
 )
+
+var sessionIDRegister = uuid.New()
 
 type registerHasher interface {
 	Hash(password []byte) ([]byte, error)
 }
 
-type registerHIBPChecker interface {
-	IsLeaked(password []byte) (bool, error)
-}
-
 type RegisterService struct {
-	repo     RegisterRepository
-	hasher   registerHasher
-	hibp     registerHIBPChecker
-	security security.PasswordLeakChecker
+	repo   RegisterRepository
+	hasher registerHasher
 }
 
-func NewRegisterService(repo RegisterRepository, hibp registerHIBPChecker, hasher registerHasher) *RegisterService {
+func NewRegisterService(repo RegisterRepository, hasher registerHasher) *RegisterService {
 	return &RegisterService{
-		repo:     repo,
-		hibp:     hibp,
-		security: hibp,
-		hasher:   hasher,
+		repo:   repo,
+		hasher: hasher,
 	}
 }
 
-func (register *RegisterService) RegisterFunction(ctx context.Context, input service.RegisterInput) (int64, error) {
-
+func (register *RegisterService) RegisterFunction(ctx context.Context, input service.RegisterInput) (int64, int, uuid.UUID, error) {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 
-	err := security.VerifyPassword(register.security, input.Password)
-	if err != nil {
-		if errors.Is(err, domain.ErrPasswordPwned) {
-			return 0, domain.ErrPasswordPwned
-		}
-		if errors.Is(err, domain.ErrShortPassword) || errors.Is(err, domain.ErrLongPassword) {
-			return 0, domain.ErrWeakPassword
-		}
+	userInputs := []string{input.Name, input.Email}
 
-		return 0, domain.ErrInternal
+	var passwordBytes []byte
+	if err := input.Password.ExecuteWithDecrypted(func(password []byte) error {
+		passwordBytes = append([]byte(nil), password...)
+		if err := security.VerifyPasswordAdvanced(passwordBytes, userInputs); err != nil {
+			if errors.Is(err, domain.ErrShortPassword) || errors.Is(err, domain.ErrLongPassword) {
+				return domain.ErrWeakPassword
+			}
+			return err
+		}
+		return nil
+	}); err != nil {
+		return 0, 0, uuid.Nil, err
 	}
 
-	hash, err := register.hasher.Hash(input.Password)
+	hash, err := register.hasher.Hash(passwordBytes)
 	if err != nil {
-		return 0, err
+		return 0, 0, uuid.Nil, err
 	}
 
-	defer security.ZeroMemory(input.Password)
+	defer security.ZeroMemory(passwordBytes)
 
 	user := &domain.User{
 		Name:         input.Name,
 		Email:        input.Email,
+		JWTVersion:   1,
 		PasswordHash: hash,
 	}
 
-	id, err := register.repo.Create(ctx, user)
+	id, jwt_version, err := register.repo.Create(ctx, user)
 	if err != nil {
-		return 0, fmt.Errorf("failed to register user: %w", err)
+		return 0, 0, uuid.Nil, fmt.Errorf("failed to register user: %w", err)
 	}
 
-	return id, nil
+	return id, jwt_version, sessionIDRegister, nil
 }
 
 func (register *RegisterService) CreateRefreshToken(ctx context.Context, userID int64, duration time.Duration) (string, error) {
@@ -83,12 +83,13 @@ func (register *RegisterService) CreateRefreshToken(ctx context.Context, userID 
 	}
 	tokenString := hex.EncodeToString(b)
 	expiresAt := time.Now().Add(duration)
+	sessionID := uuid.New()
 
 	hash := sha256.Sum256([]byte(tokenString))
-
 	tokenModel := domain.RefreshToken{
 		UserID:    userID,
-		Token:     hash[:],
+		Token:     hex.EncodeToString(hash[:]),
+		SessionID: sessionID,
 		ExpiresAt: expiresAt,
 	}
 
