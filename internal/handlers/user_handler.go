@@ -1,75 +1,83 @@
 package handlers
 
 import (
-	"log"
 	"encoding/json"
 	"net/http"
 
 	"ShieldAuth-API/internal/middleware"
 	"ShieldAuth-API/internal/response"
+	"ShieldAuth-API/internal/security"
 	"ShieldAuth-API/internal/service"
+	"ShieldAuth-API/internal/service/user"
 )
 
-
 type ChangeNameHandler struct {
-	Service *service.ChangeName
+	Service *user.ChangeNameService
 }
 type ChangeEmailHandler struct {
-	Service *service.ChangeEmail
+	Service *user.ChangeEmailService
 }
 type ResetPasswordHandler struct {
-	Service *service.ResetPassword
+	Service *user.ResetPasswordService
 }
 type DeleteAccountHandler struct {
-	Service *service.DeleteAccount
+	Service *user.DeleteAccountService
+}
+type ChangePasswordHandler struct {
+	Service *user.ChangePasswordService
 }
 
-
-func NewChangeNameHandler(service *service.ChangeName) *ChangeNameHandler {
+func NewChangeNameHandler(service *user.ChangeNameService) *ChangeNameHandler {
 	return &ChangeNameHandler{
 		Service: service,
 	}
 }
-func NewChangeEmailHandler(service *service.ChangeEmail) *ChangeEmailHandler {
+func NewChangeEmailHandler(service *user.ChangeEmailService) *ChangeEmailHandler {
 	return &ChangeEmailHandler{
 		Service: service,
 	}
 }
-func NewResetPasswordHandler(service *service.ResetPassword) *ResetPasswordHandler {
+func NewResetPasswordHandler(service *user.ResetPasswordService) *ResetPasswordHandler {
 	return &ResetPasswordHandler{
 		Service: service,
 	}
 }
-func NewDeleteAccountHandler(service *service.DeleteAccount) *DeleteAccountHandler {
+func NewDeleteAccountHandler(service *user.DeleteAccountService) *DeleteAccountHandler {
 	return &DeleteAccountHandler{
 		Service: service,
 	}
 }
-
+func NewChangePasswordHandler(service *user.ChangePasswordService) *ChangePasswordHandler {
+	return &ChangePasswordHandler{
+		Service: service,
+	}
+}
 
 type ChangeNameRequest struct {
 	CurrentName string `json:"currentName"`
-	NewName string `json:"newName"`
+	NewName     string `json:"newName"`
 }
 type ChangeEmailRequest struct {
-	CurrentEmail string `json:"currentEmail"`
-	NewEmail string `json:"newEmail"`
-	ConfirmNewEmail string `json:"confirmNewEmail"`
-	Password string `json:"password"`
+	CurrentEmail    string               `json:"currentEmail"`
+	NewEmail        string               `json:"newEmail"`
+	ConfirmNewEmail string               `json:"confirmNewEmail"`
+	Password        security.SecretBytes `json:"password"`
 }
 type ResetPasswordRequest struct {
-	Token string `json:"token"`
-	NewPassword string `json:"newPassword"`
-	ConfirmNewPassword string `json:"confirmPassword"`
+	Token              string               `json:"token"`
+	NewPassword        security.SecretBytes `json:"newPassword"`
+	ConfirmNewPassword security.SecretBytes `json:"confirmPassword"`
+}
+type DeleteAccountRequest struct {
+	Password security.SecretBytes `json:"password"`
+}
+type ChangePasswordRequest struct {
+	CurrentPassword    security.SecretBytes `json:"currentPassword"`
+	NewPassword        security.SecretBytes `json:"newPassword"`
+	ConfirmNewPassword security.SecretBytes `json:"confirmNewPassword"`
 }
 
-
 func (changeName *ChangeNameHandler) ChangeNameHandler(w http.ResponseWriter, r *http.Request) {
-
-	if r.Method == http.MethodOptions {
-		w.WriteHeader(http.StatusOK)
-		return
-	}
 
 	if r.Method != http.MethodPost {
 		w.WriteHeader(http.StatusMethodNotAllowed)
@@ -78,7 +86,7 @@ func (changeName *ChangeNameHandler) ChangeNameHandler(w http.ResponseWriter, r 
 
 	var req ChangeNameRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		response.Error(w, http.StatusBadRequest, "Invalid request", err)
+		response.Error(w, http.StatusBadRequest, "Invalid request", "INVALID_REQUEST", err)
 		return
 	}
 
@@ -90,27 +98,21 @@ func (changeName *ChangeNameHandler) ChangeNameHandler(w http.ResponseWriter, r 
 
 	userID := auth.UserID
 
-	input := service.ChangeNameData{
-		ID: userID,
+	input := service.ChangeNameInput{
+		ID:          userID,
 		CurrentName: req.CurrentName,
-		NewName: req.NewName,
+		NewName:     req.NewName,
 	}
 
 	if err := changeName.Service.ChangeNameFunction(r.Context(), input); err != nil {
-		MapServiceError(w, err)
+		LogErrorAndMap(w, err)
 		return
 	}
 
 	response.Json(w, http.StatusOK, map[string]string{"message": "success"})
 }
 
-
 func (changeEmail *ChangeEmailHandler) ChangeEmailHandler(w http.ResponseWriter, r *http.Request) {
-
-	if r.Method == http.MethodOptions {
-		w.WriteHeader(http.StatusOK)
-		return
-	}
 
 	if r.Method != http.MethodPost {
 		w.WriteHeader(http.StatusMethodNotAllowed)
@@ -119,41 +121,43 @@ func (changeEmail *ChangeEmailHandler) ChangeEmailHandler(w http.ResponseWriter,
 
 	var req ChangeEmailRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		response.Error(w, http.StatusBadRequest, "Invalid request", err)
+		response.Error(w, http.StatusBadRequest, "Invalid request", "INVALID_REQUEST", err)
 		return
 	}
 
 	auth, ok := r.Context().Value(middleware.Key).(middleware.AuthContext)
 	if !ok {
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		response.Error(w, http.StatusInternalServerError, "Internal server error", "INTERNAL_SERVER_ERROR", nil)
 		return
 	}
 
 	userID := auth.UserID
 
-	input := service.ChangeEmailData{
-		ID: userID,
-		CurrentEmail: req.CurrentEmail,
-		NewEmail: req.NewEmail,
-		ConfirmNewEmail: req.ConfirmNewEmail,
-		Password: req.Password,
+	password, err := security.NewSensitiveData([]byte(req.Password))
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "Invalid password payload", "INVALID_REQUEST", err)
+		return
 	}
 
-	if err := changeEmail.Service.ChangeEmailFunctionTest(r.Context(), input); err != nil {
-		MapServiceError(w, err)
+	input := service.ChangeEmailInput{
+		ID:              userID,
+		CurrentEmail:    req.CurrentEmail,
+		NewEmail:        req.NewEmail,
+		ConfirmNewEmail: req.ConfirmNewEmail,
+		Password:        password,
+	}
+
+	userAgent := r.Header.Get("User-Agent")
+
+	if err := changeEmail.Service.ChangeEmailFunction(r.Context(), input, userAgent); err != nil {
+		LogErrorAndMap(w, err)
 		return
 	}
 
 	response.Json(w, http.StatusOK, map[string]string{"message": "success"})
 }
 
-
 func (reset *ResetPasswordHandler) ResetPasswordHandler(w http.ResponseWriter, r *http.Request) {
-
-	if r.Method == http.MethodOptions {
-		w.WriteHeader(http.StatusOK)
-		return
-	}
 
 	if r.Method != http.MethodPost {
 		w.WriteHeader(http.StatusMethodNotAllowed)
@@ -162,56 +166,129 @@ func (reset *ResetPasswordHandler) ResetPasswordHandler(w http.ResponseWriter, r
 
 	var req ResetPasswordRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		response.Error(w, http.StatusBadRequest, "Invalid Request", err)
+		response.Error(w, http.StatusBadRequest, "Invalid Request", "INVALID_REQUEST", err)
 		return
 	}
 
-	input := service.ResetPasswordData{
-		NewPasword: req.NewPassword,
-		ConfirmPassword: req.ConfirmNewPassword,
+	newPassword, err := security.NewSensitiveData([]byte(req.NewPassword))
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "Invalid new password payload", "INVALID_REQUEST", err)
+		return
+	}
+
+	confirmPassword, err := security.NewSensitiveData([]byte(req.ConfirmNewPassword))
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "Invalid confirm password payload", "INVALID_REQUEST", err)
+		return
+	}
+
+	input := service.ResetPasswordInput{
+		NewPassword:     newPassword,
+		ConfirmPassword: confirmPassword,
 	}
 
 	token := req.Token
 
-	if err := reset.Service.ResetPasswordFunction(r.Context(), token, input); err != nil {
-		MapServiceError(w, err)
+	userAgent := r.Header.Get("User-Agent")
+
+	if err := reset.Service.ResetPasswordFunction(r.Context(), token, input, userAgent); err != nil {
+		LogErrorAndMap(w, err)
 		return
 	}
 
 	response.Json(w, http.StatusOK, map[string]string{"message": "success"})
 }
 
-
 func (deleteAccountHandler *DeleteAccountHandler) DeleteAccountHandler(w http.ResponseWriter, r *http.Request) {
 
-	if r.Method == http.MethodOptions {
-		w.WriteHeader(http.StatusOK)
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
 	}
 
-	log.SetFlags(log.Lshortfile)
-
-	if r.Method == http.MethodPost {
-
-		email := r.FormValue("emailConfirm")
-		password := r.FormValue("passwordConfirm")
-
-		ctx := r.Context()
-
-		err := deleteAccountHandler.Service.DeleteAccountFunction(ctx, email, password)
-		if err == nil {
-			w.WriteHeader(http.StatusOK)
-			w.Write([]byte("VALID"))
-			log.Println("SUCCESS")
-
-		} else {
-			log.Println("ERROR")
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-
-	} else {
-		log.Println("ERROR")
-		http.Error(w, "ERROR", http.StatusMethodNotAllowed)
+	var req DeleteAccountRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		response.Error(w, http.StatusBadRequest, "Invalid request", "INVALID_REQUEST", err)
+		return
 	}
+
+	auth, ok := r.Context().Value(middleware.Key).(middleware.AuthContext)
+	if !ok {
+		response.Error(w, http.StatusInternalServerError, "Internal server error", "INTERNAL_SERVER_ERROR", nil)
+		return
+	}
+
+	userID := auth.UserID
+
+	password, err := security.NewSensitiveData([]byte(req.Password))
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "Invalid password payload", "INVALID_REQUEST", err)
+		return
+	}
+
+	input := service.DeleteAccountInput{
+		ID:       userID,
+		Password: password,
+	}
+
+	if err := deleteAccountHandler.Service.DeleteAccountFunction(r.Context(), input); err != nil {
+		LogErrorAndMap(w, err)
+		return
+	}
+
+	response.Json(w, http.StatusOK, map[string]string{"message": "success"})
+}
+
+func (changePasswordHandler *ChangePasswordHandler) ChangePasswordHandler(w http.ResponseWriter, r *http.Request) {
+
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req ChangePasswordRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		response.Error(w, http.StatusBadRequest, "Invalid request", "INVALID_REQUEST", err)
+		return
+	}
+
+	auth, ok := r.Context().Value(middleware.Key).(middleware.AuthContext)
+	if !ok {
+		response.Error(w, http.StatusInternalServerError, "Internal server error", "INTERNAL_SERVER_ERROR", nil)
+		return
+	}
+
+	userID := auth.UserID
+
+	currentPassword, err := security.NewSensitiveData([]byte(req.CurrentPassword))
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "Invalid current password payload", "INVALID_REQUEST", err)
+		return
+	}
+
+	newPassword, err := security.NewSensitiveData([]byte(req.NewPassword))
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "Invalid new password payload", "INVALID_REQUEST", err)
+		return
+	}
+
+	confirmPassword, err := security.NewSensitiveData([]byte(req.ConfirmNewPassword))
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "Invalid confirm password payload", "INVALID_REQUEST", err)
+		return
+	}
+
+	input := service.ChangePasswordInput{
+		UserID:          userID,
+		CurrentPassword: currentPassword,
+		NewPassword:     newPassword,
+		ConfirmPassword: confirmPassword,
+	}
+
+	if err := changePasswordHandler.Service.ChangePassword(r.Context(), input); err != nil {
+		LogErrorAndMap(w, err)
+		return
+	}
+
+	response.Json(w, http.StatusOK, map[string]string{"message": "success"})
 }
