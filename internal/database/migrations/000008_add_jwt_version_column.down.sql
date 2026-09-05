@@ -1,2 +1,2 @@
 ALTER TABLE users
-DROP COLUMN IF EXISTS jwt_version FROM users;
+DROP COLUMN IF EXISTS jwt_version;
