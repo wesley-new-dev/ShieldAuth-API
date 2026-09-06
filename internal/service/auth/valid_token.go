@@ -11,13 +11,13 @@ import (
 )
 
 type ValidTokenService struct {
-	resetStore redis.PasswordResetStore
+	resetStore   redis.PasswordResetStore
 	tokenManager security.TokenManager
 }
 
 func NewValidToken(resetStore redis.PasswordResetStore, tokenManager security.TokenManager) *ValidTokenService {
 	return &ValidTokenService{
-		resetStore: resetStore,
+		resetStore:   resetStore,
 		tokenManager: tokenManager,
 	}
 }
@@ -34,6 +34,11 @@ func (v *ValidTokenService) ValidToken(ctx context.Context, code string) (string
 		return "", domain.ErrInvalidToken
 	}
 
+	userID, err := v.resetStore.Get(ctx, saveCodeKey)
+	if err != nil {
+		return "", domain.ErrInvalidToken
+	}
+
 	if err := v.resetStore.Delete(ctx, saveCodeKey); err != nil {
 		return "", domain.ErrInternal
 	}
@@ -46,7 +51,7 @@ func (v *ValidTokenService) ValidToken(ctx context.Context, code string) (string
 	tokenHash := v.tokenManager.TokenHash(token)
 
 	key := fmt.Sprintf("reset-password-token:%s", tokenHash)
-	if err := v.resetStore.Save(ctx, key, tokenHash, 5*time.Minute); err != nil {
+	if err := v.resetStore.Save(ctx, key, userID, 5*time.Minute); err != nil {
 		return "", domain.ErrInternal
 	}
 
