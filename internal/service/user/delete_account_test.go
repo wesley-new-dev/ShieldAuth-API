@@ -1,194 +1,152 @@
 package user
 
+// Coverage summary:
+// NewDeleteAccountService: constructor dependency wiring.
+// DeleteAccountFunction: repository errors and nil users, nil and malformed passwords,
+// password lengths below/at/above the limits, invalid password comparisons, successful
+// deletion with zero ID, deletion errors, and dependency call/argument assertions.
+// No path in delete_account.go is intentionally uncovered. DeleteAccountRepo and the
+// Argon2 hasher already expose interfaces, so no dependency refactoring was required.
+
 import (
-	"bytes"
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"ShieldAuth-API/internal/domain"
+	"ShieldAuth-API/internal/security"
 	"ShieldAuth-API/internal/security/argon2"
 	"ShieldAuth-API/internal/service"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 )
 
-type MockDeleteAccountRepository struct{ mock.Mock }
-
-func (m *MockDeleteAccountRepository) Delete(ctx context.Context, id int) error {
-	args := m.Called(ctx, id)
-	return args.Error(0)
-}
-func (m *MockDeleteAccountRepository) GetHashById(ctx context.Context, id int) (*domain.User, error) {
-	args := m.Called(ctx, id)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	return args.Get(0).(*domain.User), args.Error(1)
+type deleteAccountRepoMock struct {
+	getFunc     func(context.Context, int) (*domain.User, error)
+	deleteFunc  func(context.Context, int) error
+	getCalls    int
+	deleteCalls int
+	requestedID int
+	deletedID   int
 }
 
-type MockDeleteAccountHasher struct{ mock.Mock }
-
-func (m *MockDeleteAccountHasher) Compare(password []byte, passwordHash []byte) (*argon2.HashMetaData, error) {
-	args := m.Called(password, passwordHash)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	return args.Get(0).(*argon2.HashMetaData), args.Error(1)
+func (m *deleteAccountRepoMock) GetHashById(ctx context.Context, id int) (*domain.User, error) {
+	m.getCalls++
+	m.requestedID = id
+	return m.getFunc(ctx, id)
 }
 
-func (m *MockDeleteAccountHasher) Hash(password []byte) ([]byte, error) {
-	args := m.Called(password)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	return args.Get(0).([]byte), args.Error(1)
+func (m *deleteAccountRepoMock) Delete(ctx context.Context, id int) error {
+	m.deleteCalls++
+	m.deletedID = id
+	return m.deleteFunc(ctx, id)
 }
 
-func (m *MockDeleteAccountHasher) NeedsRehash(memory uint32, iterations uint32, parallelism uint8) bool {
-	args := m.Called(memory, iterations, parallelism)
-	return args.Bool(0)
+type deleteAccountHasherMock struct {
+	compareFunc  func([]byte, []byte) (*argon2.HashMetaData, error)
+	compareCalls int
+	passwords    [][]byte
+	hashes       [][]byte
 }
 
-func TestDeleteAccount(t *testing.T) {
+func (m *deleteAccountHasherMock) Compare(password, passwordHash []byte) (*argon2.HashMetaData, error) {
+	m.compareCalls++
+	m.passwords = append(m.passwords, append([]byte(nil), password...))
+	m.hashes = append(m.hashes, append([]byte(nil), passwordHash...))
+	return m.compareFunc(password, passwordHash)
+}
 
+func (m *deleteAccountHasherMock) Hash([]byte) ([]byte, error)            { return nil, nil }
+func (m *deleteAccountHasherMock) NeedsRehash(uint32, uint32, uint8) bool { return false }
+
+func newDeleteAccountInput(t *testing.T, id int, password string) service.DeleteAccountInput {
+	t.Helper()
+	sensitive, err := security.NewSensitiveData([]byte(password))
+	require.NoError(t, err)
+	return service.DeleteAccountInput{ID: id, Password: sensitive}
+}
+
+func defaultDeleteAccountUser() *domain.User {
+	return &domain.User{Id: 42, PasswordHash: []byte("stored-password-hash")}
+}
+
+func TestNewDeleteAccountService_Success(t *testing.T) {
+	repo := &deleteAccountRepoMock{}
+	hasher := &deleteAccountHasherMock{}
+
+	serviceUnderTest := NewDeleteAccountService(repo, hasher)
+
+	require.NotNil(t, serviceUnderTest)
+	assert.Same(t, repo, serviceUnderTest.repo)
+	assert.Same(t, hasher, serviceUnderTest.hasher)
+}
+
+func TestDeleteAccountFunction_Scenarios(t *testing.T) {
 	tests := []struct {
-		name          string
-		input         service.DeleteAccountInput
-		setupMocks    func(mRepo *MockDeleteAccountRepository, mHasher *MockDeleteAccountHasher)
-		expectedError error
+		name         string
+		input        func(*testing.T) service.DeleteAccountInput
+		user         *domain.User
+		getErr       error
+		compareErr   error
+		deleteErr    error
+		wantErr      error
+		wantEmptyErr bool
+		wantCompare  int
+		wantDelete   int
 	}{
-		{
-
-			name: "success: the account was deleted",
-			input: service.DeleteAccountInput{
-				UserID:          123,
-				CurrentPassword: []byte("test_current_password"),
-			},
-			setupMocks: func(mRepo *MockDeleteAccountRepository, mHasher *MockDeleteAccountHasher) {
-
-				fakeUser := domain.RestoreUser(123, "", "", []byte("test_current_password"))
-				mRepo.On("GetHashById", mock.Anything, 123).Return(fakeUser, nil)
-
-				fakeMetaData := &argon2.HashMetaData{Version: 2, Memory: 65536, Iterations: 2, Parallelism: 2}
-				mHasher.On("Compare", []byte("test_current_password"), fakeUser.PasswordHash).Return(fakeMetaData, nil)
-
-				mRepo.On("Delete", mock.Anything, 123).Return(nil)
-			},
-			expectedError: nil,
-		},
-		{
-
-			name: "Error: password is nil",
-			input: service.DeleteAccountInput{
-				UserID:          123,
-				CurrentPassword: []byte(""),
-			},
-			setupMocks:    func(mRepo *MockDeleteAccountRepository, mHasher *MockDeleteAccountHasher) {},
-			expectedError: domain.ErrInvalidData,
-		},
-		{
-
-			name: "Error: password is too short",
-			input: service.DeleteAccountInput{
-				UserID:          123,
-				CurrentPassword: []byte("short"),
-			},
-			setupMocks:    func(mRepo *MockDeleteAccountRepository, mHasher *MockDeleteAccountHasher) {},
-			expectedError: domain.ErrInvalidData,
-		},
-		{
-
-			name: "Error: passwod is too long",
-			input: service.DeleteAccountInput{
-				UserID:          123,
-				CurrentPassword: bytes.Repeat([]byte("a"), 257),
-			},
-			setupMocks:    func(mRepo *MockDeleteAccountRepository, mHasher *MockDeleteAccountHasher) {},
-			expectedError: domain.ErrInvalidData,
-		},
-		{
-
-			name: "Error: user was not found",
-			input: service.DeleteAccountInput{
-				UserID:          123,
-				CurrentPassword: []byte("test_current_password"),
-			},
-			setupMocks: func(mRepo *MockDeleteAccountRepository, mHasher *MockDeleteAccountHasher) {
-				mRepo.On("GetHashById", mock.Anything, 123).Return(nil, domain.ErrUserNotFound)
-			},
-			expectedError: domain.ErrUserNotFound,
-		},
-		{
-
-			name: "Error: wrong password",
-			input: service.DeleteAccountInput{
-				UserID:          123,
-				CurrentPassword: []byte("test_wrong_password"),
-			},
-			setupMocks: func(mRepo *MockDeleteAccountRepository, mHasher *MockDeleteAccountHasher) {
-
-				fakeUser := domain.RestoreUser(123, "", "", []byte("test_current_password"))
-				mRepo.On("GetHashById", mock.Anything, 123).Return(fakeUser, nil)
-
-				mHasher.On("Compare", []byte("test_wrong_password"), fakeUser.PasswordHash).Return(nil, domain.ErrInvalidPassword)
-			},
-			expectedError: domain.ErrInvalidPassword,
-		},
-		{
-
-			name: "Error: database internal failure on fetch",
-			input: service.DeleteAccountInput{
-				UserID:          123,
-				CurrentPassword: []byte("test_current_password"),
-			},
-			setupMocks: func(mRepo *MockDeleteAccountRepository, mHasher *MockDeleteAccountHasher) {
-				mRepo.On("GetHashById", mock.Anything, 123).Return(nil, errors.New("databse internal failure on fetch"))
-			},
-			expectedError: domain.ErrUserNotFound,
-		},
-		{
-
-			name: "Error: database failure on delete",
-			input: service.DeleteAccountInput{
-				UserID:          123,
-				CurrentPassword: []byte("test_current_password"),
-			},
-			setupMocks: func(mRepo *MockDeleteAccountRepository, mHasher *MockDeleteAccountHasher) {
-
-				fakeUser := domain.RestoreUser(123, "", "", []byte("test_current_password"))
-				mRepo.On("GetHashById", mock.Anything, 123).Return(fakeUser, nil)
-
-				fakeMetaData := &argon2.HashMetaData{Version: 2, Memory: 65536, Iterations: 2, Parallelism: 2}
-				mHasher.On("Compare", []byte("test_current_password"), fakeUser.PasswordHash).Return(fakeMetaData, nil)
-
-				mRepo.On("Delete", mock.Anything, 123).Return(domain.ErrInternal)
-			},
-			expectedError: domain.ErrInternal,
-		},
+		{name: "Success", input: func(t *testing.T) service.DeleteAccountInput { return newDeleteAccountInput(t, 42, "correct-password") }, user: defaultDeleteAccountUser(), wantCompare: 1, wantDelete: 1},
+		{name: "SuccessBoundaryLengthEightZeroID", input: func(t *testing.T) service.DeleteAccountInput { return newDeleteAccountInput(t, 0, "12345678") }, user: &domain.User{Id: 0, PasswordHash: []byte("hash")}, wantCompare: 1, wantDelete: 1},
+		{name: "SuccessBoundaryLength256", input: func(t *testing.T) service.DeleteAccountInput {
+			return newDeleteAccountInput(t, 42, strings.Repeat("p", 256))
+		}, user: defaultDeleteAccountUser(), wantCompare: 1, wantDelete: 1},
+		{name: "RepositoryError", input: func(t *testing.T) service.DeleteAccountInput { return newDeleteAccountInput(t, 42, "correct-password") }, getErr: errors.New("database unavailable"), wantErr: domain.ErrUserNotFound},
+		{name: "NilUser", input: func(t *testing.T) service.DeleteAccountInput { return newDeleteAccountInput(t, 42, "correct-password") }, wantErr: domain.ErrUserNotFound},
+		{name: "NilPassword", input: func(*testing.T) service.DeleteAccountInput { return service.DeleteAccountInput{ID: 42} }, user: defaultDeleteAccountUser(), wantErr: domain.ErrInvalidData},
+		{name: "MalformedPassword", input: func(*testing.T) service.DeleteAccountInput {
+			return service.DeleteAccountInput{ID: 42, Password: &security.SensitiveData{}}
+		}, user: defaultDeleteAccountUser(), wantEmptyErr: true},
+		{name: "ShortPassword", input: func(t *testing.T) service.DeleteAccountInput { return newDeleteAccountInput(t, 42, "1234567") }, user: defaultDeleteAccountUser(), wantErr: domain.ErrInvalidData},
+		{name: "LongPassword", input: func(t *testing.T) service.DeleteAccountInput {
+			return newDeleteAccountInput(t, 42, strings.Repeat("l", 257))
+		}, user: defaultDeleteAccountUser(), wantErr: domain.ErrInvalidData},
+		{name: "InvalidPassword", input: func(t *testing.T) service.DeleteAccountInput { return newDeleteAccountInput(t, 42, "wrong-password") }, user: defaultDeleteAccountUser(), compareErr: errors.New("comparison failed"), wantErr: domain.ErrInvalidPassword, wantCompare: 1},
+		{name: "DeleteError", input: func(t *testing.T) service.DeleteAccountInput { return newDeleteAccountInput(t, 42, "correct-password") }, user: defaultDeleteAccountUser(), deleteErr: errors.New("delete failed"), wantErr: domain.ErrInternal, wantCompare: 1, wantDelete: 1},
+		{name: "EmptyStoredHash", input: func(t *testing.T) service.DeleteAccountInput { return newDeleteAccountInput(t, 42, "correct-password") }, user: &domain.User{Id: 42}, wantCompare: 1, wantDelete: 1},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			mockRepo := new(MockDeleteAccountRepository)
-			mockHasher := new(MockDeleteAccountHasher)
-
-			tt.setupMocks(mockRepo, mockHasher)
-			deleteAccountService := NewDeleteAccountService(mockRepo, mockHasher)
-			err := deleteAccountService.DeleteAccountFunction(context.Background(), tt.input)
-
-			if tt.expectedError != nil {
-				assert.Error(t, err)
-				assert.ErrorIs(t, err, tt.expectedError)
-			} else {
-				assert.NoError(t, err)
+			repo := &deleteAccountRepoMock{
+				getFunc:    func(context.Context, int) (*domain.User, error) { return tt.user, tt.getErr },
+				deleteFunc: func(context.Context, int) error { return tt.deleteErr },
 			}
+			hasher := &deleteAccountHasherMock{compareFunc: func([]byte, []byte) (*argon2.HashMetaData, error) {
+				return &argon2.HashMetaData{}, tt.compareErr
+			}}
+			serviceUnderTest := NewDeleteAccountService(repo, hasher)
 
-			mockRepo.AssertExpectations(t)
-			mockHasher.AssertExpectations(t)
+			err := serviceUnderTest.DeleteAccountFunction(context.Background(), tt.input(t))
 
+			if tt.wantEmptyErr {
+				require.Error(t, err)
+				assert.Empty(t, err.Error())
+			} else if tt.wantErr != nil {
+				require.Error(t, err)
+				assert.Equal(t, tt.wantErr, err)
+			} else {
+				require.NoError(t, err)
+			}
+			assert.Equal(t, 1, repo.getCalls)
+			assert.Equal(t, tt.input(t).ID, repo.requestedID)
+			assert.Equal(t, tt.wantCompare, hasher.compareCalls)
+			assert.Equal(t, tt.wantDelete, repo.deleteCalls)
+			if tt.wantDelete > 0 {
+				assert.Equal(t, tt.input(t).ID, repo.deletedID)
+			}
 		})
 	}
-
 }
+
+var _ DeleteAccountRepo = (*deleteAccountRepoMock)(nil)
