@@ -27,11 +27,13 @@ func Recovery(next http.Handler) http.Handler {
 			}
 		}()
 
-		slog.InfoContext(r.Context(), "Request processed",
-			"trace_id", traceID,
-			"method", r.Method,
-			"path", r.URL.Path,
-			"duration", time.Since(start).String())
+		defer func() {
+			slog.InfoContext(r.Context(), "Request processed",
+				"trace_id", traceID,
+				"method", r.Method,
+				"path", r.URL.Path,
+				"duration", time.Since(start).String())
+		}()
 
 		next.ServeHTTP(w, r)
 	})

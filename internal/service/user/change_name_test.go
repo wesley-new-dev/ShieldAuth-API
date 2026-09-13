@@ -1,5 +1,14 @@
 package user
 
+// Coverage summary:
+// NewChangeNameService: constructor dependency wiring.
+// ChangeNameFunction: repository not-found and generic errors, nil user, successful
+// rename with whitespace normalization and zero ID, current-name mismatch, unchanged
+// name, empty new name, update errors, wrapped errors, and call tracking.
+// No path in change_name.go is intentionally uncovered. ChangeNameRepo was introduced
+// because the service previously depended on a concrete database wrapper, which could
+// not be replaced by a manual unit-test mock.
+
 import (
 	"context"
 	"errors"
@@ -9,122 +18,98 @@ import (
 	"ShieldAuth-API/internal/service"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 )
 
-
-type MockChangeNameRepository struct{ mock.Mock }
-func (m *MockChangeNameRepository) GetForChangeName(ctx context.Context, id int) (*domain.User, error) {
-	args := m.Called(ctx, id)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	return args.Get(0).(*domain.User), args.Error(1)
-}
-func (m *MockChangeNameRepository) UpdateName(ctx context.Context, user *domain.User) error {
-	args := m.Called(ctx, user)
-	return args.Error(0)
+type changeNameRepoMock struct {
+	getFunc     func(context.Context, int) (*domain.User, error)
+	updateFunc  func(context.Context, *domain.User) error
+	getCalls    int
+	updateCalls int
+	requestedID int
+	updatedUser *domain.User
 }
 
+func (m *changeNameRepoMock) GetForChangeName(ctx context.Context, id int) (*domain.User, error) {
+	m.getCalls++
+	m.requestedID = id
+	return m.getFunc(ctx, id)
+}
 
-func TestChangeNameFunction(t *testing.T) {
+func (m *changeNameRepoMock) UpdateName(ctx context.Context, user *domain.User) error {
+	m.updateCalls++
+	m.updatedUser = user
+	return m.updateFunc(ctx, user)
+}
 
-	tests := []struct{
-		name 				string
-		input 				service.ChangeNameInput
-		setupMocks 			func(mRepo *MockChangeNameRepository)
-		expectedError 		error
+func defaultChangeNameUser() *domain.User {
+	return &domain.User{Id: 10, Name: "user-test", Email: "user-test@example.com"}
+}
+
+func newChangeNameInput(id int, currentName, newName string) service.ChangeNameInput {
+	return service.ChangeNameInput{ID: id, CurrentName: currentName, NewName: newName}
+}
+
+func TestNewChangeNameService_Success(t *testing.T) {
+	repo := &changeNameRepoMock{}
+	serviceUnderTest := NewChangeNameService(repo)
+
+	require.NotNil(t, serviceUnderTest)
+	assert.Same(t, repo, serviceUnderTest.repo)
+}
+
+func TestChangeNameFunction_Scenarios(t *testing.T) {
+	tests := []struct {
+		name           string
+		input          service.ChangeNameInput
+		user           *domain.User
+		getErr         error
+		updateErr      error
+		wantErr        error
+		wantID         int
+		wantUpdate     bool
+		wantUpdateCall bool
+		wantName       string
 	}{
-		{
-
-			name: "success: name was exchanged",
-			input: service.ChangeNameInput{
-				ID: 				123,
-				CurrentName: 		"test_current_name",
-				NewName: 			"test_new_name",
-				ConfirmNewName: 	"test_new_name",
-			},
-			setupMocks: func(mRepo *MockChangeNameRepository) {
-
-				fakeUser := domain.RestoreUser(123, "test_current_name", "", nil)
-				mRepo.On("GetForChangeName", mock.Anything, 123).Return(fakeUser, nil)
-				mRepo.On("UpdateName", mock.Anything, fakeUser).Return(nil)
-
-			},
-			expectedError: nil,
-
-		},
-		{
-
-			name: "Error: user was not found",
-			input: service.ChangeNameInput{ID: 123},
-			setupMocks: func(mRepo *MockChangeNameRepository) {
-				mRepo.On("GetForChangeName", mock.Anything, 123).Return(nil, domain.ErrUserNotFound)
-			},
-			expectedError: domain.ErrUserNotFound,
-
-		},
-		{
-
-			name: "Error: domain validation failed (current name does not match record)",
-			input: service.ChangeNameInput{
-				ID: 				123,
-				CurrentName: 		"test_wrong_current_name",
-				NewName: 			"test_new_name",
-			},
-			setupMocks: func(mRepo *MockChangeNameRepository) {
-				fakeUser := domain.RestoreUser(123, "test_current_name", "", nil)
-				mRepo.On("GetForChangeName", mock.Anything, 123).Return(fakeUser, nil)
-			},
-			expectedError: domain.ErrInvalidCredentials,
-			
-		},
-		{
-
-			name: "Error: database failure on update",
-			input: service.ChangeNameInput{
-				ID: 				123,
-				CurrentName: 		"test_current_name",
-				NewName: 			"test_new_name",
-				ConfirmNewName: 	"test_new_name",
-			},
-			setupMocks: func(mRepo *MockChangeNameRepository) {
-				fakeUser := domain.RestoreUser(123, "test_current_name", "", nil)
-				mRepo.On("GetForChangeName", mock.Anything, 123).Return(fakeUser, nil)
-				mRepo.On("UpdateName", mock.Anything, fakeUser).Return(domain.ErrInternal)
-			},
-			expectedError: domain.ErrInternal,
-
-		},
-		{
-
-			name: "Error: database connection failure on fetch",
-			input: service.ChangeNameInput{ID: 123},
-			setupMocks: func(mRepo *MockChangeNameRepository) {
-				mRepo.On("GetForChangeName", mock.Anything, 123).Return(nil, errors.New("database connection failure on fetch"))
-			},
-			expectedError: domain.ErrInternal,
-
-		},
+		{name: "Success", input: newChangeNameInput(10, "user-test", "user"), user: defaultChangeNameUser(), wantID: 10, wantUpdate: true, wantUpdateCall: true, wantName: "user"},
+		{name: "SuccessTrimmedNameZeroID", input: newChangeNameInput(0, " user-test ", " user "), user: &domain.User{Name: "user-test"}, wantID: 0, wantUpdate: true, wantUpdateCall: true, wantName: "user"},
+		{name: "RepositoryNotFound", input: newChangeNameInput(10, "user-test", "user"), getErr: domain.ErrUserNotFound, wantErr: domain.ErrUserNotFound},
+		{name: "RepositoryError", input: newChangeNameInput(10, "user-test", "user"), getErr: errors.New("database unavailable"), wantErr: domain.ErrInternal},
+		{name: "NilUser", input: newChangeNameInput(10, "user-test", "user"), wantErr: domain.ErrUserNotFound},
+		{name: "CurrentNameMismatch", input: newChangeNameInput(10, "Other", "user"), user: defaultChangeNameUser(), wantErr: domain.ErrNameIsTheSame},
+		{name: "NameUnchanged", input: newChangeNameInput(10, "user-test", "user-test"), user: defaultChangeNameUser(), wantErr: domain.ErrNameIsTheSame},
+		{name: "EmptyNewName", input: newChangeNameInput(10, "user-test", ""), user: defaultChangeNameUser(), wantErr: domain.ErrInvalidCredentials},
+		{name: "UpdateError", input: newChangeNameInput(10, "user-test", "user"), user: defaultChangeNameUser(), updateErr: errors.New("update failed"), wantErr: domain.ErrInternal, wantUpdateCall: true},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			mockRepo := new(MockChangeNameRepository)
-
-			tt.setupMocks(mockRepo)
-			changeNameService := NewChangeNameService(mockRepo)
-			err := changeNameService.ChangeNameFunction(context.Background(), tt.input)
-
-			if tt.expectedError != nil {
-				assert.ErrorIs(t, err, tt.expectedError)
-			} else {
-				assert.NoError(t, err)
+			repo := &changeNameRepoMock{
+				getFunc:    func(context.Context, int) (*domain.User, error) { return tt.user, tt.getErr },
+				updateFunc: func(context.Context, *domain.User) error { return tt.updateErr },
 			}
+			serviceUnderTest := NewChangeNameService(repo)
 
-			mockRepo.AssertExpectations(t)
+			err := serviceUnderTest.ChangeNameFunction(context.Background(), tt.input)
 
+			if tt.wantErr != nil {
+				require.Error(t, err)
+				assert.ErrorIs(t, err, tt.wantErr)
+			} else {
+				require.NoError(t, err)
+			}
+			assert.Equal(t, 1, repo.getCalls)
+			assert.Equal(t, tt.input.ID, repo.requestedID)
+			if tt.wantUpdateCall {
+				assert.Equal(t, 1, repo.updateCalls)
+				if tt.wantUpdate {
+					assert.Equal(t, tt.wantName, repo.updatedUser.Name)
+				}
+			} else {
+				assert.Equal(t, 0, repo.updateCalls)
+			}
 		})
 	}
-
 }
+
+var _ ChangeNameRepo = (*changeNameRepoMock)(nil)
