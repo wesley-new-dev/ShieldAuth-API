@@ -3,16 +3,19 @@ package handlers
 import (
 	"context"
 	"errors"
+	"html/template"
 	"net/http"
 	"net/url"
 	"time"
 
+	"ShieldAuth-API/internal/middleware"
 	"ShieldAuth-API/internal/request"
 	"ShieldAuth-API/internal/response"
 	"ShieldAuth-API/internal/security"
 	"ShieldAuth-API/internal/service"
 	"ShieldAuth-API/internal/service/auth"
 	"ShieldAuth-API/internal/service/user"
+	"ShieldAuth-API/internal/ui"
 
 	"github.com/google/uuid"
 )
@@ -85,6 +88,8 @@ type LoginRequest struct {
 	NameOrEmail string               `json:"nameOrEmail"`
 	Password    security.SecretBytes `json:"password"`
 }
+
+var tmpl = template.Must(template.ParseFS(ui.Files, "templates/reset.html"))
 
 func (handler *RegisterHandler) RegisterHandler(w http.ResponseWriter, r *http.Request) {
 
@@ -255,7 +260,7 @@ func (h *RequestHandler) RequestReset(w http.ResponseWriter, r *http.Request) {
 
 	userAgent := r.Header.Get("User-Agent")
 
-	token, code, err := h.Service.RequestReset(r.Context(), req.Email, userAgent)
+	code, err := h.Service.RequestReset(r.Context(), req.Email, userAgent)
 	if err != nil {
 		LogErrorAndMap(w, err)
 		return
@@ -264,7 +269,7 @@ func (h *RequestHandler) RequestReset(w http.ResponseWriter, r *http.Request) {
 	_ = h.Limiter.ResetLimit(r.Context(), key)
 
 	w.Header().Set("Content-Type", "application/json")
-	response.Json(w, http.StatusOK, map[string]string{"code": code, "token": token})
+	response.Json(w, http.StatusOK, map[string]string{"code": code})
 }
 
 func (h *ValidTokenHandler) ValidToken(w http.ResponseWriter, r *http.Request) {
@@ -283,7 +288,9 @@ func (h *ValidTokenHandler) ValidToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	token, err := h.Service.ValidToken(r.Context(), req.Code)
+	userAgent := r.Header.Get("User-Agent")
+
+	token, err := h.Service.ValidToken(r.Context(), req.Code, userAgent)
 	if err != nil {
 		LogErrorAndMap(w, err)
 		return
@@ -301,6 +308,12 @@ func (l *LogOutHandler) LogOutHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	authContext, ok := r.Context().Value(middleware.Key).(middleware.AuthContext)
+	if !ok {
+		response.Error(w, http.StatusUnauthorized, "Unauthorized", "UNAUTHORIZED_ACCESS", nil)
+		return
+	}
+
 	cookie, err := r.Cookie("refresh_token")
 	if err != nil {
 		if errors.Is(err, http.ErrNoCookie) {
@@ -311,7 +324,13 @@ func (l *LogOutHandler) LogOutHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err = l.Service.LogOutFunction(r.Context(), service.LogOutInput{RefreshToken: []byte(cookie.Value)})
+	err = l.Service.LogOutFunction(r.Context(), service.LogOutInput{
+		RefreshToken:  []byte(cookie.Value),
+		AccessTokenID: authContext.TokenHash,
+		UserID:        int64(authContext.UserID),
+		SessionID:     authContext.SessionID,
+	})
+
 	if err != nil {
 		LogErrorAndMap(w, err)
 		return
@@ -326,5 +345,5 @@ func (l *LogOutHandler) LogOutHandler(w http.ResponseWriter, r *http.Request) {
 		Path:     "/",
 	})
 
-	response.Json(w, http.StatusNoContent, map[string]string{"message": "success"})
+	w.WriteHeader(http.StatusNoContent)
 }
